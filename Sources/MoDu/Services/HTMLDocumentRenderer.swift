@@ -65,7 +65,8 @@ final class HTMLDocumentRenderer {
             html: html,
             outline: headingResult.outline,
             fileSize: fileSize,
-            modifiedAt: modifiedAt
+            modifiedAt: modifiedAt,
+            renderingMode: .interactiveHTML
         )
     }
 

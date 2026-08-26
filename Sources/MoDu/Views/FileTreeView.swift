@@ -226,6 +226,7 @@ private struct FileTreeRow: View {
                     rowContent
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .padding(.leading, CGFloat(depth) * 15)
                 .contextMenu {
                     if !node.isDirectory {

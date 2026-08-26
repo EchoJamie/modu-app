@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 enum SelfCheck {
     static func run() -> Int32 {
         var failures: [String] = []
@@ -220,18 +221,27 @@ enum SelfCheck {
                 rootURL: root
             ).render(htmlSource, fileSize: Int64(htmlSource.utf8.count), modifiedAt: nil)
             check(FileNode.previewableExtensions.contains("html"), "HTML 与 HTM 文件进入可预览文档类型")
-            check(renderedHTML.html.contains("<h1 id=\"html-标题\">HTML 标题</h1>"), "HTML 标签按页面内容直接渲染")
+            check(renderedHTML.renderingMode == .interactiveHTML, "HTML 使用保留原始 CSS 与 JavaScript 的交互网页模式")
+            check(renderedHTML.html.contains("<h1 id=\"html-标题\">HTML 标题</h1>"), "HTML 同时生成加载失败时的静态回退内容")
             check(renderedHTML.outline.map(\.title) == ["HTML 标题"], "HTML 标题生成右侧大纲")
             check(renderedHTML.html.contains("modu-resource://local?"), "HTML 本地图片改写为安全目录资源")
             check(renderedHTML.html.contains("img-src data: modu-resource: http: https:"), "HTML CSP 允许安全本地与远程图片")
             check(renderedHTML.html.contains("modu-markdown://local?"), "HTML 可链接工作目录内的 Markdown 或 HTML 文档")
             check(renderedHTML.html.contains(".card { border: 1px solid currentColor; }"), "HTML 内联样式被保留")
-            check(!renderedHTML.html.contains("unsafeExecuted"), "HTML 文档自带脚本不会进入预览页面")
+            check(!renderedHTML.html.contains("unsafeExecuted"), "HTML 静态回退不会执行文档自带脚本")
             check(
                 renderedHTML.html.contains("style-src 'unsafe-inline'; script-src 'none'") &&
                     renderedHTML.html.contains("font-src 'none'") &&
                     !renderedHTML.html.contains("style-src 'unsafe-inline' http"),
-                "HTML 预览只为图片开放远程资源，禁止脚本、远程样式与字体"
+                "HTML 静态回退只为图片开放远程资源，禁止脚本、远程样式与字体"
+            )
+            let staticHTMLCompatibilityScript = MarkdownWebView.Coordinator.staticHTMLCompatibilityScript
+            check(
+                staticHTMLCompatibilityScript.contains("#write.modu-html-document") &&
+                    staticHTMLCompatibilityScript.contains("visibleSlides.length > 1") &&
+                    staticHTMLCompatibilityScript.contains("modu-static-slide-frame") &&
+                    staticHTMLCompatibilityScript.contains("window.addEventListener('pagehide', cleanup"),
+                "HTML 原始文件加载失败时可安全降级为可清理的静态长页"
             )
 
             check(BundledAssetSchemeHandler.mermaidAssetURL != nil, "固定版本 Mermaid JavaScript 已打入 SwiftPM 资源")
@@ -256,6 +266,68 @@ enum SelfCheck {
             check(FileSystemService.isIgnoredAppleMetadata(named: "._preview.png"), "目录列表忽略 AppleDouble 元数据")
             check(!FileSystemService.isIgnoredAppleMetadata(named: ".env"), "目录列表保留普通点文件")
             check(!FileSystemService.isIgnoredAppleMetadata(named: ".github"), "目录列表保留普通点目录")
+
+            let treeDirectoryEntry = FileEntry(
+                url: root.appendingPathComponent("tree", isDirectory: true),
+                kind: .directory
+            )
+            let retainedChildEntry = FileEntry(
+                url: treeDirectoryEntry.url.appendingPathComponent("retained.md"),
+                kind: .file
+            )
+            let removedChildEntry = FileEntry(
+                url: treeDirectoryEntry.url.appendingPathComponent("removed.md"),
+                kind: .file
+            )
+            let addedChildEntry = FileEntry(
+                url: treeDirectoryEntry.url.appendingPathComponent("added.md"),
+                kind: .file
+            )
+            let treeDirectoryNode = FileNode(entry: treeDirectoryEntry)
+            let retainedChildNode = FileNode(entry: retainedChildEntry)
+            treeDirectoryNode.isExpanded = true
+            treeDirectoryNode.children = [
+                retainedChildNode,
+                FileNode(entry: removedChildEntry)
+            ]
+            FileTreeMerger.prepareForRefresh([treeDirectoryNode])
+            let mergedTree = FileTreeMerger.merge(
+                entries: [treeDirectoryEntry],
+                reusing: [treeDirectoryNode],
+                refreshedEntriesByDirectory: [
+                    treeDirectoryEntry.url.path: [retainedChildEntry, addedChildEntry]
+                ],
+                forcedExpandedPaths: []
+            )
+            check(mergedTree.first === treeDirectoryNode, "目录刷新复用路径未变化的节点身份")
+            check(treeDirectoryNode.isExpanded, "目录刷新保持用户已经展开的状态")
+            check(
+                treeDirectoryNode.children?.first === retainedChildNode &&
+                    treeDirectoryNode.children?.map(\.name) == ["retained.md", "added.md"],
+                "目录刷新只增删变化的子项并复用未变化行"
+            )
+            check(
+                SidePanelLayout.maximumWidth(forWindowWidth: 1_440) == 480 &&
+                    SidePanelLayout.maximumWidth(forWindowWidth: 600) == 260,
+                "左右侧栏最大宽度按当前窗口三分之一动态调整并保留最小可用宽度"
+            )
+            check(
+                OutlineResizeMath.width(
+                    startWidth: 320,
+                    startPointerX: 800,
+                    currentPointerX: 740,
+                    minimumWidth: 260,
+                    maximumWidth: 600
+                ) == 380 &&
+                    OutlineResizeMath.width(
+                        startWidth: 320,
+                        startPointerX: 800,
+                        currentPointerX: 900,
+                        minimumWidth: 260,
+                        maximumWidth: 600
+                    ) == 260,
+                "大纲分割条按全局鼠标位移一比一调整宽度并正确限制边界"
+            )
 
             check(MarkdownStyle.migrated(from: "paper") == .newsprint, "旧纸页主题偏好可迁移")
             check(MarkdownStyle.migrated(from: "graphite") == .dark, "旧深色主题偏好可迁移")

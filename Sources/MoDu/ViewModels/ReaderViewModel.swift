@@ -228,6 +228,8 @@ final class ReaderViewModel: ObservableObject {
         workspaceAccessSession = accessSession
         let workspaceURL = accessSession.rootURL
         rootURL = workspaceURL
+        rootNodes = []
+        rootIsLoading = true
         selectedURL = nil
         documentState = .welcome
         scrollRequest = nil
@@ -249,27 +251,45 @@ final class ReaderViewModel: ObservableObject {
     func rescanWorkspace(revealing revealingURL: URL? = nil) {
         guard let rootURL, let accessSession = workspaceAccessSession else { return }
         rootTask?.cancel()
-        rootNodes = []
-        rootIsLoading = true
+        let expandedDirectories = Self.expandedDirectoryURLs(in: rootNodes)
+        FileTreeMerger.prepareForRefresh(rootNodes)
+        let shouldShowInitialLoading = rootNodes.isEmpty
+        if rootIsLoading != shouldShowInitialLoading {
+            rootIsLoading = shouldShowInitialLoading
+        }
 
         let workspaceToken = workspaceGeneration
         let treeToken = UUID()
         treeGeneration = treeToken
-        let directoriesToExpand = Self.directoryURLsToExpand(
+        let directoriesToReveal = Self.directoryURLsToExpand(
             revealing: revealingURL,
             inside: rootURL
+        )
+        let directoriesToRefresh = Self.uniqueDirectoryURLs(
+            expandedDirectories + directoriesToReveal
+        )
+        let forcedExpandedPaths = Set(
+            directoriesToReveal.map { $0.standardizedFileURL.path }
         )
         rootTask = Task { [weak self, accessSession] in
             defer { _ = accessSession }
             do {
                 let entries = try await FileSystemService.entries(at: rootURL, inside: rootURL)
                 var expandedEntries: [String: [FileEntry]] = [:]
-                for directoryURL in directoriesToExpand {
+                for directoryURL in directoriesToRefresh {
                     try Task.checkCancellation()
-                    expandedEntries[directoryURL.standardizedFileURL.path] = try await FileSystemService.entries(
-                        at: directoryURL,
-                        inside: rootURL
-                    )
+                    do {
+                        expandedEntries[directoryURL.standardizedFileURL.path] = try await FileSystemService.entries(
+                            at: directoryURL,
+                            inside: rootURL
+                        )
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // 根目录结果仍可移除已经不存在的节点；单个展开目录读取失败时
+                        // 保留其当前子树，避免一次局部权限或 IO 故障清空整棵目录树。
+                        continue
+                    }
                 }
                 try Task.checkCancellation()
                 guard
@@ -277,12 +297,18 @@ final class ReaderViewModel: ObservableObject {
                     self.workspaceGeneration == workspaceToken,
                     self.treeGeneration == treeToken
                 else { return }
-                self.rootNodes = entries.map(FileNode.init)
-                self.restoreExpandedDirectories(
-                    directoriesToExpand,
-                    using: expandedEntries
+                let mergedNodes = FileTreeMerger.merge(
+                    entries: entries,
+                    reusing: self.rootNodes,
+                    refreshedEntriesByDirectory: expandedEntries,
+                    forcedExpandedPaths: forcedExpandedPaths
                 )
-                self.rootIsLoading = false
+                if !FileTreeMerger.hasSameIdentityOrder(self.rootNodes, mergedNodes) {
+                    self.rootNodes = mergedNodes
+                }
+                if self.rootIsLoading {
+                    self.rootIsLoading = false
+                }
                 self.rootTask = nil
             } catch is CancellationError {
                 return
@@ -291,7 +317,9 @@ final class ReaderViewModel: ObservableObject {
                     self.workspaceGeneration == workspaceToken,
                     self.treeGeneration == treeToken
                 else { return }
-                self.rootIsLoading = false
+                if self.rootIsLoading {
+                    self.rootIsLoading = false
+                }
                 self.fileOperationError = L10n.format(.errorReloadDirectory, error.localizedDescription)
                 self.rootTask = nil
             }
@@ -741,22 +769,20 @@ final class ReaderViewModel: ObservableObject {
         }
     }
 
-    private func restoreExpandedDirectories(
-        _ directoryURLs: [URL],
-        using entriesByPath: [String: [FileEntry]]
-    ) {
-        var siblings = rootNodes
-        for directoryURL in directoryURLs {
-            let path = directoryURL.standardizedFileURL.path
-            guard
-                let node = siblings.first(where: { $0.url.standardizedFileURL.path == path }),
-                let entries = entriesByPath[path]
-            else { return }
-            node.isExpanded = true
-            node.isLoading = false
-            node.children = entries.map(FileNode.init)
-            siblings = node.children ?? []
+    private static func expandedDirectoryURLs(in nodes: [FileNode]) -> [URL] {
+        var result: [URL] = []
+        for node in nodes where node.isDirectory && node.isExpanded {
+            result.append(node.url.standardizedFileURL)
+            if let children = node.children {
+                result.append(contentsOf: expandedDirectoryURLs(in: children))
+            }
         }
+        return result
+    }
+
+    private static func uniqueDirectoryURLs(_ urls: [URL]) -> [URL] {
+        var seen: Set<String> = []
+        return urls.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
     private func restoreRecentWorkspaces() {

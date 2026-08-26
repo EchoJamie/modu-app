@@ -282,29 +282,74 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
 
     private func startHTMLCheck() {
         guard let webView, let root = temporaryRoot, !isFinished else { return }
+        let cssSource = """
+        html, body { height: 100%; margin: 0; background: rgb(2, 6, 15); }
+        .viewport { position: fixed; inset: 0; display: flex; overflow: hidden; }
+        .slide { position: absolute; display: none; width: 640px; height: 360px; }
+        .slide.active { display: block; }
+        .card { border-top: 3px solid rgb(1, 2, 3); }
+        """
+        let scriptSource = """
+        (() => {
+          const slides = Array.from(document.querySelectorAll('.slide'));
+          const show = index => slides.forEach((slide, itemIndex) => {
+            slide.classList.toggle('active', itemIndex === index);
+          });
+          document.getElementById('next').addEventListener('click', () => show(1));
+          window.moduPrototypeShow = show;
+          show(0);
+          window.moduPrototypeScriptExecuted = true;
+        })();
+        """
         let htmlSource = """
         <!doctype html>
-        <html>
-        <head><style>.card { border-top: 3px solid rgb(1, 2, 3); }</style></head>
+        <html lang="zh-CN">
+        <head>
+          <meta charset="utf-8">
+          <link rel="stylesheet" href="../shared/prototype.css">
+        </head>
         <body>
-          <h1>HTML 实机检查</h1>
-          <div class="card">静态页面</div>
-          <img id="local-image" src="./preview.png" alt="本地图片">
-          <script>window.moduUnsafeScriptExecuted = true</script>
+          <div id="viewport" class="viewport">
+            <section id="slide-one" class="slide">
+              <h1>HTML 实机检查</h1>
+              <div class="card">静态页面</div>
+              <img id="local-image" src="../shared/preview.png" alt="本地图片">
+            </section>
+            <section id="slide-two" class="slide">
+              <h2>第二页</h2>
+            </section>
+          </div>
+          <button id="next" type="button">下一页</button>
+          <script src="../shared/prototype.js"></script>
         </body>
         </html>
         """
         do {
-            let rendered = try HTMLDocumentRenderer(
-                style: ResolvedReaderTheme(style: .github, isDark: false),
-                documentURL: root.appendingPathComponent("preview.html"),
-                rootURL: root
-            ).render(htmlSource, fileSize: Int64(htmlSource.utf8.count), modifiedAt: nil)
+            let prototypeDirectory = root.appendingPathComponent("prototype", isDirectory: true)
+            let sharedDirectory = root.appendingPathComponent("shared", isDirectory: true)
+            try FileManager.default.createDirectory(at: prototypeDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+            let htmlURL = prototypeDirectory.appendingPathComponent("preview.html")
+            try cssSource.write(
+                to: sharedDirectory.appendingPathComponent("prototype.css"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try scriptSource.write(
+                to: sharedDirectory.appendingPathComponent("prototype.js"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try FileManager.default.copyItem(
+                at: root.appendingPathComponent("preview.png"),
+                to: sharedDirectory.appendingPathComponent("preview.png")
+            )
+            try htmlSource.write(to: htmlURL, atomically: true, encoding: .utf8)
             phase = .html
             deadline = Date().addingTimeInterval(8)
-            webView.loadHTMLString(rendered.html, baseURL: nil)
+            webView.loadFileURL(htmlURL, allowingReadAccessTo: root)
         } catch {
-            finish(success: false, message: "WKWebView HTML 测试文档生成失败：\(error.localizedDescription)")
+            finish(success: false, message: "WKWebView HTML 原型测试文件生成失败：\(error.localizedDescription)")
         }
     }
 
@@ -314,12 +359,23 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
         (() => {
           const image = document.getElementById('local-image');
           const card = document.querySelector('.card');
+          const slides = Array.from(document.querySelectorAll('.slide'));
+          window.moduPrototypeShow?.(0);
+          const initialSlideVisible = slides.length === 2 &&
+            slides[0].classList.contains('active') &&
+            !slides[1].classList.contains('active');
+          document.getElementById('next')?.click();
           return {
             heading: document.querySelector('h1')?.textContent || '',
             imageReady: Boolean(image?.complete && image?.naturalWidth > 0),
-            scriptBlocked: window.moduUnsafeScriptExecuted !== true,
+            scriptExecuted: window.moduPrototypeScriptExecuted === true,
             cardBorder: card ? getComputedStyle(card).borderTopWidth : '',
-            htmlLanguage: document.documentElement.lang
+            htmlLanguage: document.documentElement.lang,
+            initialSlideVisible,
+            nextSlideVisible: slides.length === 2 &&
+              !slides[0].classList.contains('active') &&
+              slides[1].classList.contains('active'),
+            fileProtocol: location.protocol
           };
         })()
         """
@@ -332,26 +388,32 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             let result = value as? [String: Any]
             let heading = result?["heading"] as? String
             let imageReady = result?["imageReady"] as? Bool ?? false
-            let scriptBlocked = result?["scriptBlocked"] as? Bool ?? false
+            let scriptExecuted = result?["scriptExecuted"] as? Bool ?? false
             let cardBorder = result?["cardBorder"] as? String
             let htmlLanguage = result?["htmlLanguage"] as? String
+            let initialSlideVisible = result?["initialSlideVisible"] as? Bool ?? false
+            let nextSlideVisible = result?["nextSlideVisible"] as? Bool ?? false
+            let fileProtocol = result?["fileProtocol"] as? String
             if
                 heading == "HTML 实机检查",
                 imageReady,
-                scriptBlocked,
+                scriptExecuted,
                 cardBorder == "3px",
-                htmlLanguage == L10n.htmlLanguageCode
+                htmlLanguage == "zh-CN",
+                initialSlideVisible,
+                nextSlideVisible,
+                fileProtocol == "file:"
             {
                 self.finish(
                     success: true,
-                    message: "WKWebView 已验证离线 Mermaid、metadata 折叠交互与安全 HTML 预览"
+                    message: "WKWebView 已验证离线 Mermaid、metadata 折叠交互与完整本地 HTML 原型"
                 )
                 return
             }
             guard Date() < self.deadline else {
                 self.finish(
                     success: false,
-                    message: "WKWebView HTML 验证超时：标题=\(heading ?? "空")，图片=\(imageReady)，脚本阻止=\(scriptBlocked)，样式=\(cardBorder ?? "空")"
+                    message: "WKWebView HTML 验证超时：标题=\(heading ?? "空")，图片=\(imageReady)，脚本=\(scriptExecuted)，样式=\(cardBorder ?? "空")，初始页=\(initialSlideVisible)，交互翻页=\(nextSlideVisible)，协议=\(fileProtocol ?? "空")"
                 )
                 return
             }

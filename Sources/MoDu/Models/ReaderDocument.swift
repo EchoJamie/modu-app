@@ -13,11 +13,31 @@ struct RenderedMarkdown: @unchecked Sendable {
     let outline: [OutlineItem]
     let fileSize: Int64
     let modifiedAt: Date?
+    let renderingMode: ReaderDocumentRenderingMode
+
+    init(
+        html: String,
+        outline: [OutlineItem],
+        fileSize: Int64,
+        modifiedAt: Date?,
+        renderingMode: ReaderDocumentRenderingMode = .styledDocument
+    ) {
+        self.html = html
+        self.outline = outline
+        self.fileSize = fileSize
+        self.modifiedAt = modifiedAt
+        self.renderingMode = renderingMode
+    }
 }
 
 struct ScrollRequest: Equatable {
     let id = UUID()
     let anchor: String
+}
+
+enum ReaderDocumentRenderingMode: Sendable {
+    case styledDocument
+    case interactiveHTML
 }
 
 enum ReaderDocumentState {

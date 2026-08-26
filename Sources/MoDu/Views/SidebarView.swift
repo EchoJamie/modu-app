@@ -128,6 +128,7 @@ struct SidebarView: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .foregroundStyle(theme.secondary)
                 .help(L10n.string(.sidebarReloadHelp))
             }
@@ -202,6 +203,7 @@ struct SidebarView: View {
                 } label: {
                     Label(L10n.string(.sidebarOpenOther), systemImage: "folder.badge.plus")
                 }
+                .focusable(false)
 
                 Spacer()
 
@@ -209,6 +211,7 @@ struct SidebarView: View {
                     Button(L10n.string(.sidebarClearRecent)) {
                         model.clearRecentWorkspaces()
                     }
+                        .focusable(false)
                         .foregroundStyle(theme.secondary)
                 }
             }
@@ -250,6 +253,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .background(theme.canvas.opacity(theme.isDark ? 0.5 : 0.72))
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .help(workspace.displayPath)
@@ -268,6 +272,7 @@ struct SidebarView: View {
                 model.chooseFolder()
             }
             .buttonStyle(.borderedProminent)
+            .focusable(false)
             .tint(theme.accent)
             .controlSize(.small)
 

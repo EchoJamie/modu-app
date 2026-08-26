@@ -69,6 +69,7 @@ struct DocumentView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .foregroundStyle(theme.secondary)
                 .help(L10n.string(.documentClosePane))
             }
@@ -178,6 +179,7 @@ private struct WelcomeView: View {
                     model.chooseFolder()
                 }
                 .buttonStyle(.borderedProminent)
+                .focusable(false)
                 .tint(theme.accent)
             }
         }

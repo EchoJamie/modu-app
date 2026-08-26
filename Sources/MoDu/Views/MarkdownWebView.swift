@@ -43,18 +43,23 @@ struct MarkdownWebView: NSViewRepresentable {
         webView.onFocus = onFocus
         webView.allowsMagnification = true
         webView.allowsBackForwardNavigationGestures = false
-        webView.underPageBackgroundColor = style.canvasColor
+        webView.underPageBackgroundColor = document.renderingMode == .interactiveHTML
+            ? .clear
+            : style.canvasColor
         if #available(macOS 13.3, *) {
             webView.isInspectable = false
         }
 
         context.coordinator.lastDocumentID = document.id
         context.coordinator.lastDocumentURL = documentURL
+        context.coordinator.lastRootURL = rootURL
         context.coordinator.lastDocumentHTML = document.html
+        context.coordinator.lastOutline = document.outline
+        context.coordinator.renderingMode = document.renderingMode
         context.coordinator.lastStyle = style
         context.coordinator.webContentRecoveryCount = 0
         context.coordinator.resourceHandler.rootURL = rootURL
-        webView.loadHTMLString(document.html, baseURL: nil)
+        context.coordinator.loadCurrentDocument(in: webView)
         return webView
     }
 
@@ -63,21 +68,28 @@ struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.onActiveHeading = onActiveHeading
         (webView as? FocusReportingWebView)?.onFocus = onFocus
         context.coordinator.resourceHandler.rootURL = rootURL
-        webView.underPageBackgroundColor = style.canvasColor
+        webView.underPageBackgroundColor = document.renderingMode == .interactiveHTML
+            ? .clear
+            : style.canvasColor
 
         if context.coordinator.lastDocumentID != document.id {
             context.coordinator.lastDocumentID = document.id
             context.coordinator.lastDocumentURL = documentURL
+            context.coordinator.lastRootURL = rootURL
             context.coordinator.lastDocumentHTML = document.html
+            context.coordinator.lastOutline = document.outline
+            context.coordinator.renderingMode = document.renderingMode
             context.coordinator.lastStyle = style
             context.coordinator.lastScrollID = nil
             context.coordinator.lastReportedAnchor = nil
             context.coordinator.webContentRecoveryCount = 0
             context.coordinator.pendingAnchor = scrollRequest?.anchor
-            webView.loadHTMLString(document.html, baseURL: nil)
+            context.coordinator.loadCurrentDocument(in: webView)
         } else if context.coordinator.lastStyle != style {
             context.coordinator.lastStyle = style
-            context.coordinator.apply(style: style, to: webView)
+            if document.renderingMode == .styledDocument {
+                context.coordinator.apply(style: style, to: webView)
+            }
         }
 
         if let scrollRequest, context.coordinator.lastScrollID != scrollRequest.id {
@@ -100,6 +112,7 @@ struct MarkdownWebView: NSViewRepresentable {
         coordinator.onActiveHeading = nil
         coordinator.pendingAnchor = nil
         coordinator.lastDocumentHTML = nil
+        coordinator.lastOutline = []
         (webView as? FocusReportingWebView)?.onFocus = nil
     }
 
@@ -113,12 +126,17 @@ struct MarkdownWebView: NSViewRepresentable {
         var onActiveHeading: ((String?) -> Void)?
         var lastDocumentID: UUID?
         var lastDocumentURL: URL?
+        var lastRootURL: URL?
         var lastDocumentHTML: String?
+        var lastOutline: [OutlineItem] = []
+        var renderingMode: ReaderDocumentRenderingMode = .styledDocument
         var lastStyle: ResolvedReaderTheme?
         var lastScrollID: UUID?
         var pendingAnchor: String?
         var lastReportedAnchor: String?
         var webContentRecoveryCount = 0
+        var interactiveLoadFinished = false
+        var isDisplayingHTMLFallback = false
         private static let maximumWebContentRecoveries = 1
 
         init(
@@ -131,13 +149,40 @@ struct MarkdownWebView: NSViewRepresentable {
             self.onActiveHeading = onActiveHeading
         }
 
+        func loadCurrentDocument(in webView: WKWebView) {
+            webView.stopLoading()
+            interactiveLoadFinished = false
+            isDisplayingHTMLFallback = false
+
+            if
+                renderingMode == .interactiveHTML,
+                let documentURL = lastDocumentURL,
+                let rootURL = lastRootURL
+            {
+                webView.loadFileURL(documentURL, allowingReadAccessTo: rootURL)
+            } else if let lastDocumentHTML {
+                webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
+            }
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            if renderingMode == .interactiveHTML, !isDisplayingHTMLFallback {
+                interactiveLoadFinished = true
+                if let pendingAnchor {
+                    self.pendingAnchor = nil
+                    scroll(to: pendingAnchor, in: webView)
+                }
+                installInteractiveHTMLOutline(in: webView)
+                return
+            }
+
             if let pendingAnchor {
                 self.pendingAnchor = nil
                 scroll(to: pendingAnchor, in: webView)
             } else {
                 webView.evaluateJavaScript("window.scrollTo(0, 0)")
             }
+            installStaticHTMLCompatibility(in: webView)
             installOutlineTracking(in: webView)
             if let lastStyle {
                 apply(style: lastStyle, to: webView)
@@ -155,7 +200,13 @@ struct MarkdownWebView: NSViewRepresentable {
             }
             webContentRecoveryCount += 1
             pendingAnchor = lastReportedAnchor
-            webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
+            if renderingMode == .interactiveHTML, let documentURL = lastDocumentURL, let rootURL = lastRootURL {
+                interactiveLoadFinished = false
+                isDisplayingHTMLFallback = false
+                webView.loadFileURL(documentURL, allowingReadAccessTo: rootURL)
+            } else {
+                webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
+            }
         }
 
         func userContentController(
@@ -196,6 +247,54 @@ struct MarkdownWebView: NSViewRepresentable {
                 return
             }
 
+            if renderingMode == .interactiveHTML, !isDisplayingHTMLFallback {
+                if scheme == "file" {
+                    guard
+                        let rootURL = lastRootURL,
+                        (try? FileSystemService.validate(url, inside: rootURL)) != nil
+                    else {
+                        decisionHandler(.cancel)
+                        return
+                    }
+
+                    if
+                        navigationAction.targetFrame?.isMainFrame != false,
+                        FileNode.markdownExtensions.contains(url.pathExtension.lowercased())
+                    {
+                        decisionHandler(.cancel)
+                        onOpenMarkdown?(url, url.fragment)
+                    } else {
+                        decisionHandler(.allow)
+                    }
+                    return
+                }
+
+                if let scheme, ["http", "https"].contains(scheme) {
+                    if navigationAction.targetFrame?.isMainFrame == false {
+                        decisionHandler(.allow)
+                    } else {
+                        decisionHandler(.cancel)
+                        if navigationAction.navigationType == .linkActivated {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    return
+                }
+
+                if scheme == "mailto" {
+                    decisionHandler(.cancel)
+                    if navigationAction.navigationType == .linkActivated {
+                        NSWorkspace.shared.open(url)
+                    }
+                    return
+                }
+
+                if let scheme, ["blob", "data"].contains(scheme) {
+                    decisionHandler(navigationAction.targetFrame?.isMainFrame == false ? .allow : .cancel)
+                    return
+                }
+            }
+
             if scheme == MarkdownRenderer.markdownScheme {
                 decisionHandler(.cancel)
                 guard
@@ -224,6 +323,22 @@ struct MarkdownWebView: NSViewRepresentable {
             decisionHandler(.cancel)
         }
 
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            showInteractiveHTMLFallbackIfNeeded(in: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFail navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            showInteractiveHTMLFallbackIfNeeded(in: webView)
+        }
+
         func apply(style: ResolvedReaderTheme, to webView: WKWebView) {
             guard let literal = Self.javaScriptLiteral(style.stylesheet) else { return }
             let script = """
@@ -244,13 +359,57 @@ struct MarkdownWebView: NSViewRepresentable {
             webView.evaluateJavaScript(script)
         }
 
-        private func installOutlineTracking(in webView: WKWebView) {
+        private func installStaticHTMLCompatibility(in webView: WKWebView) {
+            webView.evaluateJavaScript(Self.staticHTMLCompatibilityScript)
+        }
+
+        private func showInteractiveHTMLFallbackIfNeeded(in webView: WKWebView) {
+            guard
+                renderingMode == .interactiveHTML,
+                !interactiveLoadFinished,
+                !isDisplayingHTMLFallback,
+                let lastDocumentHTML
+            else { return }
+            isDisplayingHTMLFallback = true
+            webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
+        }
+
+        private func installInteractiveHTMLOutline(in webView: WKWebView) {
+            guard
+                let data = try? JSONSerialization.data(
+                    withJSONObject: lastOutline.map(\.anchor),
+                    options: []
+                ),
+                let anchors = String(data: data, encoding: .utf8)
+            else { return }
+
+            let script = """
+            (() => {
+              const headings = Array.from(document.querySelectorAll(
+                'h1, h2, h3, h4, h5, h6'
+              ));
+              const anchors = \(anchors);
+              headings.forEach((heading, index) => {
+                if (!heading.id && anchors[index]) heading.id = anchors[index];
+              });
+            })();
+            """
+            webView.evaluateJavaScript(script) { [weak self, weak webView] _, _ in
+                guard let self, let webView else { return }
+                self.installOutlineTracking(in: webView, rootSelector: "body")
+            }
+        }
+
+        private func installOutlineTracking(in webView: WKWebView, rootSelector: String = "#write") {
+            guard let rootSelectorLiteral = Self.javaScriptLiteral(rootSelector) else { return }
             let script = """
             (() => {
               if (window.__moduOutlineTracking) return;
 
-              const headings = Array.from(document.querySelectorAll(
-                '#write h1[id], #write h2[id], #write h3[id], #write h4[id], #write h5[id], #write h6[id]'
+              const content = document.querySelector(\(rootSelectorLiteral));
+              if (!content) return;
+              const headings = Array.from(content.querySelectorAll(
+                'h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'
               ));
               let lastAnchor = null;
               let framePending = false;
@@ -295,7 +454,6 @@ struct MarkdownWebView: NSViewRepresentable {
               window.addEventListener('resize', scheduleUpdate);
               var observer = null;
               if (window.ResizeObserver) {
-                const content = document.getElementById('write');
                 if (content) {
                   observer = new ResizeObserver(scheduleUpdate);
                   observer.observe(content);
@@ -350,6 +508,131 @@ struct MarkdownWebView: NSViewRepresentable {
                 .replacingOccurrences(of: "&", with: "&amp;")
                 .replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")
+        }
+
+        nonisolated static var staticHTMLCompatibilityScript: String {
+            """
+            (() => {
+              if (window.__moduStaticHTML) return true;
+
+              const root = document.querySelector('#write.modu-html-document');
+              if (!root) return false;
+
+              const slides = Array.from(root.querySelectorAll('.slide'));
+              if (slides.length < 2) return false;
+
+              const visibleSlides = slides.filter(slide => getComputedStyle(slide).display !== 'none');
+              const parent = slides[0].parentElement;
+              if (
+                visibleSlides.length > 1 ||
+                !parent ||
+                !slides.every(slide => slide.parentElement === parent)
+              ) {
+                return false;
+              }
+
+              const fallbackStyle = document.createElement('style');
+              fallbackStyle.id = 'modu-static-html-fallback';
+              fallbackStyle.textContent = `
+                html.modu-static-html,
+                html.modu-static-html body {
+                  height: auto !important;
+                  min-height: 100% !important;
+                  overflow: auto !important;
+                }
+                #write.modu-html-document.modu-static-slides {
+                  width: 100% !important;
+                  max-width: none !important;
+                  min-height: 100% !important;
+                  margin: 0 !important;
+                  padding: 24px !important;
+                  overflow: visible !important;
+                }
+                #write.modu-html-document .modu-static-slide-stack {
+                  position: static !important;
+                  inset: auto !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                  align-items: center !important;
+                  justify-content: flex-start !important;
+                  width: 100% !important;
+                  height: auto !important;
+                  min-height: 0 !important;
+                  overflow: visible !important;
+                }
+                #write.modu-html-document .modu-static-slide-frame {
+                  position: relative !important;
+                  flex: none !important;
+                  margin: 0 auto 24px !important;
+                  overflow: visible !important;
+                }
+                #write.modu-html-document .modu-static-slide-frame > .slide {
+                  position: relative !important;
+                  inset: auto !important;
+                  display: block !important;
+                  margin: 0 !important;
+                  transform-origin: top left !important;
+                }
+                #write.modu-html-document #hud,
+                #write.modu-html-document #progress {
+                  display: none !important;
+                }
+              `;
+              document.head.appendChild(fallbackStyle);
+              document.documentElement.classList.add('modu-static-html');
+              root.classList.add('modu-static-slides');
+              parent.classList.add('modu-static-slide-stack');
+
+              const entries = slides.map(slide => {
+                slide.style.setProperty('display', 'block', 'important');
+                slide.style.setProperty('position', 'relative', 'important');
+                slide.style.setProperty('inset', 'auto', 'important');
+                slide.style.setProperty('transform', 'none', 'important');
+                slide.style.setProperty('transform-origin', 'top left', 'important');
+
+                const computed = getComputedStyle(slide);
+                const width = Math.max(parseFloat(computed.width) || slide.scrollWidth || 1, 1);
+                const height = Math.max(parseFloat(computed.height) || slide.scrollHeight || 1, 1);
+                const frame = document.createElement('div');
+                frame.className = 'modu-static-slide-frame';
+                parent.insertBefore(frame, slide);
+                frame.appendChild(slide);
+                return { slide, frame, width, height };
+              });
+
+              let frameRequest = 0;
+              const layout = () => {
+                frameRequest = 0;
+                const rootStyle = getComputedStyle(root);
+                const horizontalPadding =
+                  (parseFloat(rootStyle.paddingLeft) || 0) +
+                  (parseFloat(rootStyle.paddingRight) || 0);
+                const availableWidth = Math.max(root.clientWidth - horizontalPadding, 1);
+
+                entries.forEach(({ slide, frame, width, height }) => {
+                  const scale = Math.min(1, availableWidth / width);
+                  slide.style.setProperty('transform', `scale(${scale})`, 'important');
+                  frame.style.width = `${Math.ceil(width * scale)}px`;
+                  frame.style.height = `${Math.ceil(height * scale)}px`;
+                });
+              };
+              const scheduleLayout = () => {
+                if (frameRequest) return;
+                frameRequest = window.requestAnimationFrame(layout);
+              };
+              const cleanup = () => {
+                window.removeEventListener('resize', scheduleLayout);
+                if (frameRequest) window.cancelAnimationFrame(frameRequest);
+                window.__moduStaticHTML = null;
+              };
+
+              window.addEventListener('resize', scheduleLayout, { passive: true });
+              window.addEventListener('pagehide', cleanup, { once: true });
+              window.__moduStaticHTML = { cleanup, slideCount: slides.length };
+              layout();
+              return true;
+            })();
+            """
         }
 
         nonisolated static func mermaidRenderingScript(isDark: Bool) -> String {

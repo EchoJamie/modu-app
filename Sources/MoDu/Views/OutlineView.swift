@@ -93,6 +93,7 @@ struct OutlineView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .help(item.title)
     }
 }

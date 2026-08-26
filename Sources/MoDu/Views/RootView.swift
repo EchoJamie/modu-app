@@ -9,71 +9,84 @@ struct RootView: View {
     private var theme: ResolvedReaderTheme { model.resolvedTheme }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 268, max: 360)
-        } detail: {
-            ResizableOutlineLayout(
-                outlineIsVisible: model.outlineIsVisible,
-                minimumContentWidth: model.hasSecondPane ? 640 : 320,
-                preferredOutlineWidth: $outlinePanelWidth,
-                minimumOutlineWidth: OutlinePanelLayout.minimumWidth,
-                maximumOutlineWidth: OutlinePanelLayout.maximumWidth,
-                dividerColor: theme.divider,
-                onOutlineWidthCommit: persistOutlinePanelWidth
-            ) {
-                readerPanes
-            } outline: {
-                OutlineView(
-                    items: model.outlineItems(for: model.activePane),
-                    pane: model.activePane
-                )
+        GeometryReader { geometry in
+            let panelMaximumWidth = SidePanelLayout.maximumWidth(
+                forWindowWidth: geometry.size.width
+            )
+
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(
+                        min: SidePanelLayout.sidebarMinimumWidth,
+                        ideal: SidePanelLayout.sidebarIdealWidth,
+                        max: panelMaximumWidth
+                    )
+            } detail: {
+                ResizableOutlineLayout(
+                    outlineIsVisible: model.outlineIsVisible,
+                    minimumContentWidth: model.hasSecondPane ? 640 : 320,
+                    preferredOutlineWidth: $outlinePanelWidth,
+                    minimumOutlineWidth: OutlinePanelLayout.minimumWidth,
+                    maximumOutlineWidth: panelMaximumWidth,
+                    dividerColor: theme.divider,
+                    onOutlineWidthCommit: persistOutlinePanelWidth
+                ) {
+                    readerPanes
+                } outline: {
+                    OutlineView(
+                        items: model.outlineItems(for: model.activePane),
+                        pane: model.activePane
+                    )
+                }
             }
-        }
-        .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    model.reloadActiveDocument()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(!model.canReloadActiveDocument)
-                .help(L10n.string(.toolbarReloadHelp))
+            .navigationSplitViewStyle(.balanced)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        model.reloadActiveDocument()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(!model.canReloadActiveDocument)
+                    .focusable(false)
+                    .help(L10n.string(.toolbarReloadHelp))
 
-                Button {
-                    model.toggleSplitReading()
-                } label: {
-                    Image(systemName: "rectangle.split.2x1")
-                        .symbolVariant(model.hasSecondPane ? .fill : .none)
-                }
-                .help(L10n.string(model.hasSecondPane
-                    ? .toolbarCloseSplitHelp
-                    : .toolbarOpenSplitHelp))
-                .accessibilityLabel(L10n.string(model.hasSecondPane
-                    ? .commandCloseActivePane
-                    : .commandOpenSecondPane))
+                    Button {
+                        model.toggleSplitReading()
+                    } label: {
+                        Image(systemName: "rectangle.split.2x1")
+                            .symbolVariant(model.hasSecondPane ? .fill : .none)
+                    }
+                    .focusable(false)
+                    .help(L10n.string(model.hasSecondPane
+                        ? .toolbarCloseSplitHelp
+                        : .toolbarOpenSplitHelp))
+                    .accessibilityLabel(L10n.string(model.hasSecondPane
+                        ? .commandCloseActivePane
+                        : .commandOpenSecondPane))
 
-                themeMenu
-                displayModeMenu
+                    themeMenu
+                    displayModeMenu
 
-                Button {
-                    model.outlineIsVisible.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .symbolVariant(model.outlineIsVisible ? .fill : .none)
+                    Button {
+                        model.outlineIsVisible.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                            .symbolVariant(model.outlineIsVisible ? .fill : .none)
+                    }
+                    .focusable(false)
+                    .help(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
                 }
-                .help(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
             }
-        }
-        .tint(theme.accent)
-        .background(theme.canvas)
-        .onAppear {
-            model.updateSystemColorScheme(colorScheme)
-            model.openDebugArgumentsIfNeeded()
-        }
-        .onChange(of: colorScheme) { newColorScheme in
-            model.updateSystemColorScheme(newColorScheme)
+            .tint(theme.accent)
+            .background(theme.canvas)
+            .onAppear {
+                model.updateSystemColorScheme(colorScheme)
+                model.openDebugArgumentsIfNeeded()
+            }
+            .onChange(of: colorScheme) { newColorScheme in
+                model.updateSystemColorScheme(newColorScheme)
+            }
         }
     }
 
@@ -95,7 +108,7 @@ struct RootView: View {
     }
 
     private func persistOutlinePanelWidth(_ width: CGFloat) {
-        let clampedWidth = OutlinePanelLayout.clamped(width)
+        let clampedWidth = OutlinePanelLayout.clampedToMinimum(width)
         UserDefaults.standard.set(
             Double(clampedWidth),
             forKey: OutlinePanelLayout.storageKey
@@ -119,6 +132,7 @@ struct RootView: View {
         } label: {
             Image(systemName: model.appAppearance.symbol)
         }
+        .focusable(false)
         .help(L10n.format(.toolbarDisplayModeHelp, model.appAppearance.name))
     }
 
@@ -143,6 +157,7 @@ struct RootView: View {
         } label: {
             Image(systemName: model.markdownStyle.symbol)
         }
+        .focusable(false)
         .help(L10n.format(.toolbarThemeHelp, model.markdownStyle.name))
     }
 }
@@ -150,16 +165,28 @@ struct RootView: View {
 private enum OutlinePanelLayout {
     static let minimumWidth: CGFloat = 260
     static let defaultWidth: CGFloat = 310
-    static let maximumWidth: CGFloat = 560
     static let storageKey = "outlinePanelWidth.v1"
 
-    static func clamped(_ width: CGFloat) -> CGFloat {
-        min(max(width, minimumWidth), maximumWidth)
+    static func clampedToMinimum(_ width: CGFloat) -> CGFloat {
+        max(width, minimumWidth)
     }
 
     static func restoredWidth() -> CGFloat {
         let storedWidth = UserDefaults.standard.double(forKey: storageKey)
         guard storedWidth > 0 else { return defaultWidth }
-        return clamped(CGFloat(storedWidth))
+        return clampedToMinimum(CGFloat(storedWidth))
+    }
+}
+
+enum SidePanelLayout {
+    static let sidebarMinimumWidth: CGFloat = 220
+    static let sidebarIdealWidth: CGFloat = 268
+    static let maximumWindowFraction: CGFloat = 1 / 3
+
+    static func maximumWidth(forWindowWidth width: CGFloat) -> CGFloat {
+        max(
+            max(sidebarMinimumWidth, OutlinePanelLayout.minimumWidth),
+            width * maximumWindowFraction
+        )
     }
 }

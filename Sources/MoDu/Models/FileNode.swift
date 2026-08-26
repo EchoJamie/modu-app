@@ -1,8 +1,98 @@
 import Foundation
 
-enum FileNodeKind: Sendable {
+enum FileNodeKind: Sendable, Equatable {
     case directory
     case file
+}
+
+@MainActor
+enum FileTreeMerger {
+    static func prepareForRefresh(_ nodes: [FileNode]) {
+        for node in nodes {
+            node.loadingTask?.cancel()
+            node.loadingTask = nil
+            node.loadingGeneration = UUID()
+            if node.isLoading {
+                node.isLoading = false
+            }
+            if let children = node.children {
+                prepareForRefresh(children)
+            }
+        }
+    }
+
+    static func merge(
+        entries: [FileEntry],
+        reusing existingNodes: [FileNode],
+        refreshedEntriesByDirectory: [String: [FileEntry]],
+        forcedExpandedPaths: Set<String>
+    ) -> [FileNode] {
+        var existingByID = Dictionary(uniqueKeysWithValues: existingNodes.map { ($0.id, $0) })
+        var mergedNodes: [FileNode] = []
+        mergedNodes.reserveCapacity(entries.count)
+
+        for entry in entries {
+            let entryID = entry.url.path
+            let previousNode = existingByID.removeValue(forKey: entryID)
+            let node: FileNode
+            if let previousNode, previousNode.kind == entry.kind {
+                node = previousNode
+            } else {
+                if let previousNode {
+                    cancelRecursively(previousNode)
+                }
+                node = FileNode(entry: entry)
+            }
+
+            if node.isDirectory {
+                let shouldExpand = node.isExpanded || forcedExpandedPaths.contains(entryID)
+                if node.isExpanded != shouldExpand {
+                    node.isExpanded = shouldExpand
+                }
+                if shouldExpand, let childEntries = refreshedEntriesByDirectory[entryID] {
+                    node.loadingTask?.cancel()
+                    node.loadingTask = nil
+                    node.loadingGeneration = UUID()
+                    let existingChildren = node.children ?? []
+                    let mergedChildren = merge(
+                        entries: childEntries,
+                        reusing: existingChildren,
+                        refreshedEntriesByDirectory: refreshedEntriesByDirectory,
+                        forcedExpandedPaths: forcedExpandedPaths
+                    )
+                    if node.children == nil || !hasSameIdentityOrder(existingChildren, mergedChildren) {
+                        node.children = mergedChildren
+                    }
+                    if node.isLoading {
+                        node.isLoading = false
+                    }
+                } else if !shouldExpand {
+                    if let children = node.children {
+                        children.forEach(cancelRecursively)
+                        node.children = nil
+                    }
+                    if node.isLoading {
+                        node.isLoading = false
+                    }
+                }
+            }
+            mergedNodes.append(node)
+        }
+
+        existingByID.values.forEach(cancelRecursively)
+        return mergedNodes
+    }
+
+    static func hasSameIdentityOrder(_ lhs: [FileNode], _ rhs: [FileNode]) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0 === $1 }
+    }
+
+    private static func cancelRecursively(_ node: FileNode) {
+        node.loadingTask?.cancel()
+        node.loadingTask = nil
+        node.loadingGeneration = UUID()
+        node.children?.forEach(cancelRecursively)
+    }
 }
 
 struct FileEntry: Sendable {
