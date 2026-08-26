@@ -1,0 +1,75 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Custom folder icon file is named "Icon" followed by a carriage return.
+Icon?
+._*
+
+# macOS system directories
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# macOS network-share metadata
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.pins
+
+# Keep Package.resolved under version control for this executable application.
+!Package.resolved
+
+# Xcode build output
+build/
+Build/
+DerivedData/
+*.xcarchive/
+*.dSYM/
+*.dSYM.zip
+
+# Packaged application and release products
+*.app/
+*.dmg
+*.pkg
+*.ipa
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.moved-aside
+
+# Swift compiler intermediates
+*.o
+*.d
+*.swiftdeps
+*.swiftmodule
+*.swiftdoc
+*.swiftsourceinfo
+
+# Test and coverage output
+*.profdata
+*.profraw
+*.gcda
+*.gcno
+.coverage/
+
+# Local editor and temporary files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

@@ -1,0 +1,8 @@
+# Keep source text normalized across environments.
+* text=auto
+
+# Bundled third-party distribution artifact; review its version and checksum via ORIGIN.md.
+Sources/MoDu/Resources/Mermaid/mermaid.min.js -diff -whitespace linguist-vendored
+
+# Binary application artwork.
+Config/AppIcon-1024.png binary
