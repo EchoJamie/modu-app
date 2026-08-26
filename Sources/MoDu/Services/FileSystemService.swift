@@ -6,8 +6,8 @@ enum FileSystemError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .outsideWorkspace: "该文件不在当前工作目录中。"
-        case .unsupportedEncoding: "无法识别这个文件的文本编码。"
+        case .outsideWorkspace: L10n.string(.errorOutsideWorkspace)
+        case .unsupportedEncoding: L10n.string(.errorUnsupportedEncoding)
         }
     }
 }

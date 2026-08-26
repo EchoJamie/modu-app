@@ -10,7 +10,7 @@ struct OutlineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("大纲")
+                Text(L10n.string(.outlineTitle))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(theme.foreground)
                 Spacer()
@@ -31,7 +31,7 @@ struct OutlineView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "list.bullet.indent")
                         .font(.system(size: 21, weight: .light))
-                    Text("这篇文档没有标题")
+                    Text(L10n.string(.outlineEmpty))
                         .font(.system(size: 14))
                 }
                 .foregroundStyle(theme.secondary.opacity(0.8))

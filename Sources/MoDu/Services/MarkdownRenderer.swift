@@ -130,7 +130,7 @@ final class MarkdownRenderer {
 
         let html = """
         <!doctype html>
-        <html lang="zh-CN">
+        <html lang="\(L10n.htmlLanguageCode)">
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -162,11 +162,11 @@ final class MarkdownRenderer {
         let collapsibleClass = metadata.isCollapsible ? " is-collapsible" : ""
 
         body += """
-        <section class="front-matter\(collapsibleClass)" aria-label="文档元数据">
+        <section class="front-matter\(collapsibleClass)" aria-label="\(escapeAttribute(L10n.string(.metadataAria)))">
           <div class="front-matter-heading">
             <span class="front-matter-mark" aria-hidden="true"></span>
-            <span class="front-matter-title">文档信息</span>
-            <span class="front-matter-count">\(metadata.entries.count) 项</span>
+            <span class="front-matter-title">\(escapeText(L10n.string(.metadataTitle)))</span>
+            <span class="front-matter-count">\(escapeText(L10n.format(.metadataCount, metadata.entries.count)))</span>
           </div>
           <dl class="front-matter-list front-matter-preview">
         """
@@ -175,13 +175,13 @@ final class MarkdownRenderer {
 
         if metadata.isCollapsible {
             let expandLabel = remainingEntries.isEmpty
-                ? "展开完整内容"
-                : "展开其余 \(remainingEntries.count) 项"
+                ? L10n.string(.metadataExpandFull)
+                : L10n.format(.metadataExpandRemaining, remainingEntries.count)
             body += """
               <details class="front-matter-more">
                 <summary>
-                  <span class="front-matter-expand">\(expandLabel)</span>
-                  <span class="front-matter-collapse">收起文档信息</span>
+                  <span class="front-matter-expand">\(escapeText(expandLabel))</span>
+                  <span class="front-matter-collapse">\(escapeText(L10n.string(.metadataCollapse)))</span>
                 </summary>
             """
             if !remainingEntries.isEmpty {
@@ -264,7 +264,7 @@ final class MarkdownRenderer {
         let escapedSource = escapeText(source)
         let sourceDetails = """
         <details class="mermaid-source-details">
-          <summary>查看 Mermaid 源代码</summary>
+          <summary>\(escapeText(L10n.string(.mermaidSourceSummary)))</summary>
           <pre class="mermaid-source"><code>\(escapedSource)</code></pre>
         </details>
         """
@@ -276,9 +276,14 @@ final class MarkdownRenderer {
         else {
             body += """
             <figure class="mermaid-diagram is-error" data-mermaid-index="\(mermaidDiagramCount)">
-              <div class="mermaid-output" role="img" aria-label="Mermaid 图表"></div>
-              <p class="mermaid-status" role="status">图表数量或内容超过安全限制，已保留源代码而未执行渲染。</p>
-              <p class="mermaid-error-detail">单图最多 \(Self.maximumMermaidSourceSize) 字节；每篇最多 \(Self.maximumMermaidDiagramCount) 张、合计 \(Self.maximumMermaidTotalSourceSize) 字节。</p>
+              <div class="mermaid-output" role="img" aria-label="\(escapeAttribute(L10n.string(.mermaidAriaLabel)))"></div>
+              <p class="mermaid-status" role="status">\(escapeText(L10n.string(.mermaidLimitStatus)))</p>
+              <p class="mermaid-error-detail">\(escapeText(L10n.format(
+                .mermaidLimitDetail,
+                Self.maximumMermaidSourceSize,
+                Self.maximumMermaidDiagramCount,
+                Self.maximumMermaidTotalSourceSize
+              )))</p>
               \(sourceDetails)
             </figure>
             """
@@ -288,8 +293,8 @@ final class MarkdownRenderer {
         hasRenderableMermaidDiagram = true
         body += """
         <figure class="mermaid-diagram is-rendering" data-mermaid-index="\(mermaidDiagramCount)" data-mermaid-renderable="true" aria-busy="true">
-          <div class="mermaid-output" role="img" aria-label="Mermaid 图表"></div>
-          <p class="mermaid-status" role="status">正在渲染 Mermaid 图表…</p>
+          <div class="mermaid-output" role="img" aria-label="\(escapeAttribute(L10n.string(.mermaidAriaLabel)))"></div>
+          <p class="mermaid-status" role="status">\(escapeText(L10n.string(.mermaidRendering)))</p>
           <p class="mermaid-error-detail"></p>
           \(sourceDetails)
         </figure>
@@ -427,7 +432,9 @@ final class MarkdownRenderer {
             let source = image.source,
             let src = resolvedImage(source)
         else {
-            let label = alt.isEmpty ? "图片未加载" : "图片：\(alt)"
+            let label = alt.isEmpty
+                ? L10n.string(.imageNotLoaded)
+                : L10n.format(.imageWithAlt, alt)
             body += "<span class=\"image-placeholder\">\(escapeText(label))</span>"
             return
         }

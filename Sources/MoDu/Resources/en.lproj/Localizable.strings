@@ -1,0 +1,112 @@
+"app.name" = "MoDu";
+"common.ok" = "OK";
+"common.unknownError" = "Unknown error";
+
+"command.openFolder" = "Open Folder…";
+"command.openRecent" = "Open Recent";
+"command.clearMenu" = "Clear Menu";
+"command.reading" = "Reading";
+"command.reloadDocumentOutline" = "Reload Current Document and Outline";
+"command.reloadDirectory" = "Reload Directory";
+"command.theme" = "Theme";
+"command.displayMode" = "Appearance";
+"command.openSecondPane" = "Open Second Reading Pane";
+"command.closeActivePane" = "Close Active Reading Pane";
+
+"outline.hide" = "Hide Outline";
+"outline.show" = "Show Outline";
+"outline.title" = "Outline";
+"outline.empty" = "This document has no headings";
+"outline.resizeHelp" = "Drag to resize the outline";
+"outline.resizeAccessibility" = "Resize outline width";
+
+"appearance.system" = "Follow System";
+"appearance.light" = "Light";
+"appearance.dark" = "Dark";
+
+"theme.newsprint.name" = "Newsprint";
+"theme.newsprint.subtitle" = "Serif body text with a paper-like feel";
+"theme.minimal.name" = "Minimal";
+"theme.minimal.subtitle" = "A modern layout with generous spacing";
+"theme.sepia.name" = "Sepia";
+"theme.sepia.subtitle" = "Warm colors for long reading sessions";
+"theme.dark.name" = "Ink Night";
+"theme.dark.subtitle" = "A restrained neutral ink palette";
+"theme.github.name" = "GitHub";
+"theme.github.subtitle" = "Familiar technical-document styling";
+
+"error.outsideWorkspace" = "This file is outside the current workspace.";
+"error.unsupportedEncoding" = "The text encoding of this file could not be recognized.";
+"error.emptyName" = "The name cannot be empty.";
+"error.nameSeparator" = "The name cannot contain “/”.";
+"error.renameOutside" = "The renamed item must remain inside the current workspace.";
+"error.targetExists" = "An item with the same name already exists in this folder.";
+"error.recentUnavailable" = "This recent folder is no longer accessible and was removed from the list.";
+"error.bookmarkSave" = "Could not save access to the recent folder: %@";
+"error.reloadDirectory" = "Could not reload the directory: %@";
+
+"workspace.notOpened" = "No Folder Open";
+"document.loadFailed" = "Load Failed";
+"folderPicker.title" = "Choose a Document Folder";
+"folderPicker.message" = "Choose a folder to browse, read, and rename its files.";
+"folderPicker.prompt" = "Open";
+
+"sidebar.loading" = "Loading directory…";
+"sidebar.privacyNote" = "Local files · Remote images on demand";
+"sidebar.operationFailed" = "Operation Failed";
+"sidebar.chooseWorkspace" = "Click to choose a workspace";
+"sidebar.currentWorkspaceSwitch" = "Workspace · Click to switch";
+"sidebar.switchHelp" = "Switch workspace";
+"sidebar.reloadHelp" = "Reload directory (file list only)";
+"sidebar.switchTitle" = "Switch Workspace";
+"sidebar.recent" = "RECENT";
+"sidebar.noOtherRecent" = "No other recent folders";
+"sidebar.openOther" = "Open Another Folder…";
+"sidebar.clearRecent" = "Clear History";
+"sidebar.empty" = "Files in the folder will appear here";
+"sidebar.openFolder" = "Open Folder";
+
+"document.closePane" = "Close This Pane";
+"document.loading" = "Loading %@…";
+"document.unsupportedTitle" = "Preview Not Supported";
+"document.unsupportedMessage" = "%@ is not a supported Markdown or HTML file.";
+"document.failedTitle" = "Load Failed";
+"welcome.title" = "Choose a Markdown or HTML document";
+"welcome.subtitle" = "Manage files locally and load remote images only when needed";
+"welcome.localRendering" = "Local Rendering";
+"welcome.rename" = "Rename in Folder";
+"welcome.splitReading" = "Split Reading";
+
+"toolbar.reloadHelp" = "Reload the current document and outline";
+"toolbar.openSplitHelp" = "Open a second reading pane (⌘\\)";
+"toolbar.closeSplitHelp" = "Close the active reading pane (⌘\\)";
+"toolbar.displayModeHelp" = "Appearance: %@";
+"toolbar.themeHelp" = "Theme: %@ (applies to the interface and document)";
+
+"fileTree.openOtherPane" = "Open in Other Pane";
+"fileTree.rename" = "Rename";
+"fileTree.returnKey" = "Return";
+"fileTree.copyPath" = "Copy Absolute Path";
+"fileTree.namePlaceholder" = "Name";
+
+"metadata.aria" = "Document metadata";
+"metadata.title" = "DOCUMENT INFO";
+"metadata.count" = "%d items";
+"metadata.expandFull" = "Show full content";
+"metadata.expandRemaining" = "Show %d more";
+"metadata.collapse" = "Collapse document info";
+
+"mermaid.sourceSummary" = "View Mermaid source";
+"mermaid.ariaLabel" = "Mermaid diagram";
+"mermaid.limitStatus" = "The diagram count or content exceeds the safety limit. The source has been preserved without rendering.";
+"mermaid.limitDetail" = "Each diagram may contain up to %d bytes; each document may contain up to %d diagrams and %d bytes in total.";
+"mermaid.rendering" = "Rendering Mermaid diagram…";
+"mermaid.unable" = "This Mermaid diagram could not be rendered.";
+"mermaid.offlineMissing" = "The offline Mermaid component could not be loaded.";
+"mermaid.syntax" = "Check the Mermaid syntax.";
+"mermaid.failed" = "Mermaid rendering failed.";
+
+"image.notLoaded" = "Image not loaded";
+"image.withAlt" = "Image: %@";
+"webView.recoveryTitle" = "The document display process could not recover";
+"webView.recoveryMessage" = "To prevent repeated memory usage, MoDu stopped automatic reloads. Use the reload button in the top-right corner to try again.";

@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "MoDu",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v13)
     ],
@@ -21,7 +22,9 @@ let package = Package(
             ],
             path: "Sources/MoDu",
             resources: [
-                .copy("Resources/Mermaid")
+                .copy("Resources/Mermaid"),
+                .process("Resources/en.lproj"),
+                .process("Resources/zh-Hans.lproj")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)

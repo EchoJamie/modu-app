@@ -319,7 +319,7 @@ struct MarkdownWebView: NSViewRepresentable {
             let stylesheet = style?.stylesheet ?? ""
             return """
             <!doctype html>
-            <html lang="zh-CN">
+            <html lang="\(L10n.htmlLanguageCode)">
             <head>
               <meta charset="utf-8">
               <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -327,15 +327,15 @@ struct MarkdownWebView: NSViewRepresentable {
             </head>
             <body>
               <main id="write">
-                <h2>文档显示进程无法恢复</h2>
-                <p>为避免反复占用内存，墨读已停止自动重载。请使用右上角刷新按钮重试。</p>
+                <h2>\(htmlEscaped(L10n.string(.webViewRecoveryTitle)))</h2>
+                <p>\(htmlEscaped(L10n.string(.webViewRecoveryMessage)))</p>
               </main>
             </body>
             </html>
             """
         }
 
-        private static func javaScriptLiteral(_ value: String) -> String? {
+        nonisolated private static func javaScriptLiteral(_ value: String) -> String? {
             guard
                 let data = try? JSONSerialization.data(withJSONObject: [value]),
                 var encoded = String(data: data, encoding: .utf8)
@@ -345,8 +345,20 @@ struct MarkdownWebView: NSViewRepresentable {
             return encoded
         }
 
+        private static func htmlEscaped(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+        }
+
         nonisolated static func mermaidRenderingScript(isDark: Bool) -> String {
-            """
+            let unableMessage = javaScriptLiteral(L10n.string(.mermaidUnable)) ?? "\"Mermaid error\""
+            let missingMessage = javaScriptLiteral(L10n.string(.mermaidOfflineMissing)) ?? "\"Mermaid unavailable\""
+            let renderingMessage = javaScriptLiteral(L10n.string(.mermaidRendering)) ?? "\"Rendering Mermaid…\""
+            let syntaxMessage = javaScriptLiteral(L10n.string(.mermaidSyntax)) ?? "\"Check Mermaid syntax.\""
+            let failedMessage = javaScriptLiteral(L10n.string(.mermaidFailed)) ?? "\"Mermaid rendering failed.\""
+            return """
             (() => {
               const diagrams = Array.from(document.querySelectorAll(
                 '.mermaid-diagram[data-mermaid-renderable="true"]'
@@ -360,7 +372,7 @@ struct MarkdownWebView: NSViewRepresentable {
                 diagram.classList.remove('is-rendering', 'is-ready');
                 diagram.classList.add('is-error');
                 diagram.setAttribute('aria-busy', 'false');
-                diagram.querySelector('.mermaid-status').textContent = '无法渲染这张 Mermaid 图表。';
+                diagram.querySelector('.mermaid-status').textContent = \(unableMessage);
                 diagram.querySelector('.mermaid-error-detail').textContent = detail;
               };
 
@@ -372,7 +384,7 @@ struct MarkdownWebView: NSViewRepresentable {
               const renderAll = async () => {
                 if (generation !== window.__moduMermaidGeneration) return;
                 if (!globalThis.mermaid || typeof globalThis.mermaid.render !== 'function') {
-                  diagrams.forEach((diagram) => setError(diagram, '离线 Mermaid 组件未能加载。'));
+                  diagrams.forEach((diagram) => setError(diagram, \(missingMessage)));
                   return;
                 }
 
@@ -429,7 +441,7 @@ struct MarkdownWebView: NSViewRepresentable {
                   diagram.classList.remove('is-ready', 'is-error');
                   diagram.classList.add('is-rendering');
                   diagram.setAttribute('aria-busy', 'true');
-                  diagram.querySelector('.mermaid-status').textContent = '正在渲染 Mermaid 图表…';
+                  diagram.querySelector('.mermaid-status').textContent = \(renderingMessage);
                   diagram.querySelector('.mermaid-error-detail').textContent = '';
 
                   try {
@@ -446,7 +458,7 @@ struct MarkdownWebView: NSViewRepresentable {
                   } catch (error) {
                     cleanupTemporaryNode(renderIdentifier);
                     if (generation !== window.__moduMermaidGeneration) return;
-                    const detail = String(error?.message || error || '请检查 Mermaid 语法。').slice(0, 240);
+                    const detail = String(error?.message || error || \(syntaxMessage)).slice(0, 240);
                     setError(diagram, detail);
                   }
                 }
@@ -457,7 +469,7 @@ struct MarkdownWebView: NSViewRepresentable {
                   await renderAll();
                 } catch (error) {
                   if (generation !== window.__moduMermaidGeneration) return;
-                  const detail = String(error?.message || error || 'Mermaid 渲染失败。').slice(0, 240);
+                  const detail = String(error?.message || error || \(failedMessage)).slice(0, 240);
                   diagrams.forEach((diagram) => setError(diagram, detail));
                 }
               };
@@ -558,7 +570,7 @@ final class BundledAssetSchemeHandler: NSObject, WKURLSchemeHandler {
             forResource: "mermaid.min",
             withExtension: "js",
             subdirectory: "Mermaid"
-        ) ?? Bundle.module.url(
+        ) ?? AppResources.bundle.url(
             forResource: "mermaid.min",
             withExtension: "js",
             subdirectory: "Mermaid"

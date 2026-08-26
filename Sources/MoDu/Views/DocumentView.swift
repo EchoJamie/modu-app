@@ -70,7 +70,7 @@ struct DocumentView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(theme.secondary)
-                .help("关闭此栏")
+                .help(L10n.string(.documentClosePane))
             }
         }
         .padding(.horizontal, 12)
@@ -90,7 +90,7 @@ struct DocumentView: View {
         case .loading(let url):
             VStack(spacing: 12) {
                 ProgressView()
-                Text("正在读取 \(url.lastPathComponent)…")
+                Text(L10n.format(.documentLoading, url.lastPathComponent))
                     .font(.system(size: 13))
                     .foregroundStyle(theme.secondary)
             }
@@ -117,13 +117,13 @@ struct DocumentView: View {
         case .unsupported(let url):
             StatusView(
                 symbol: "doc.questionmark",
-                title: "暂不支持预览",
-                message: "\(url.lastPathComponent) 不是支持的 Markdown 或 HTML 文件。"
+                title: L10n.string(.documentUnsupportedTitle),
+                message: L10n.format(.documentUnsupportedMessage, url.lastPathComponent)
             )
         case .failed(_, let message):
             StatusView(
                 symbol: "exclamationmark.triangle",
-                title: "读取失败",
+                title: L10n.string(.documentFailedTitle),
                 message: message
             )
         }
@@ -159,22 +159,22 @@ private struct WelcomeView: View {
                 .foregroundStyle(theme.accent)
 
             VStack(spacing: 7) {
-                Text("选择一篇 Markdown 或 HTML 文档")
+                Text(L10n.string(.welcomeTitle))
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(theme.foreground)
-                Text("本地管理，按需加载文档中的远程图片")
+                Text(L10n.string(.welcomeSubtitle))
                     .font(.system(size: 13))
                     .foregroundStyle(theme.secondary)
             }
 
             HStack(spacing: 8) {
-                badge("本地渲染", symbol: "doc.text")
-                badge("目录内重命名", symbol: "pencil")
-                badge("双栏阅读", symbol: "rectangle.split.2x1")
+                badge(L10n.string(.welcomeLocalRendering), symbol: "doc.text")
+                badge(L10n.string(.welcomeRename), symbol: "pencil")
+                badge(L10n.string(.welcomeSplitReading), symbol: "rectangle.split.2x1")
             }
 
             if model.rootURL == nil {
-                Button("打开目录") {
+                Button(L10n.string(.sidebarOpenFolder)) {
                     model.chooseFolder()
                 }
                 .buttonStyle(.borderedProminent)

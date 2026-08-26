@@ -128,7 +128,7 @@ private struct OutlineResizeHandle: View {
                     onCommit(preferredWidth)
                 }
             }
-            .help("拖动调整大纲宽度")
-            .accessibilityLabel("调整大纲宽度")
+            .help(L10n.string(.outlineResizeHelp))
+            .accessibilityLabel(L10n.string(.outlineResizeAccessibility))
     }
 }

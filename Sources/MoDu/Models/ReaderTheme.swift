@@ -13,21 +13,21 @@ enum MarkdownStyle: String, CaseIterable, Identifiable, Sendable {
 
     var name: String {
         switch self {
-        case .newsprint: "纸页"
-        case .minimal: "极简"
-        case .sepia: "暖沙"
-        case .dark: "墨夜"
-        case .github: "GitHub"
+        case .newsprint: L10n.string(.themeNewsprintName)
+        case .minimal: L10n.string(.themeMinimalName)
+        case .sepia: L10n.string(.themeSepiaName)
+        case .dark: L10n.string(.themeDarkName)
+        case .github: L10n.string(.themeGitHubName)
         }
     }
 
     var subtitle: String {
         switch self {
-        case .newsprint: "宋体正文与纸张质感"
-        case .minimal: "留白充足的现代阅读"
-        case .sepia: "适合长时间阅读的暖色"
-        case .dark: "克制的中性墨色界面"
-        case .github: "熟悉的技术文档排版"
+        case .newsprint: L10n.string(.themeNewsprintSubtitle)
+        case .minimal: L10n.string(.themeMinimalSubtitle)
+        case .sepia: L10n.string(.themeSepiaSubtitle)
+        case .dark: L10n.string(.themeDarkSubtitle)
+        case .github: L10n.string(.themeGitHubSubtitle)
         }
     }
 

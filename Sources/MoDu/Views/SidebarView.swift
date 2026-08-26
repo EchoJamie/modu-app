@@ -24,7 +24,7 @@ struct SidebarView: View {
                         VStack(spacing: 10) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("正在读取目录…")
+                            Text(L10n.string(.sidebarLoading))
                                 .font(.caption)
                                 .foregroundStyle(theme.secondary)
                         }
@@ -42,7 +42,7 @@ struct SidebarView: View {
             HStack(spacing: 7) {
                 Image(systemName: "photo.on.rectangle.angled")
                     .font(.system(size: 11))
-                Text("本地管理 · 远程图片按需加载")
+                Text(L10n.string(.sidebarPrivacyNote))
                     .font(.system(size: 11, weight: .medium))
                 Spacer()
             }
@@ -52,7 +52,7 @@ struct SidebarView: View {
         }
         .background(theme.chrome)
         .alert(
-            "操作失败",
+            L10n.string(.sidebarOperationFailed),
             isPresented: Binding(
                 get: { model.fileOperationError != nil },
                 set: { isPresented in
@@ -62,11 +62,11 @@ struct SidebarView: View {
                 }
             )
         ) {
-            Button("好") {
+            Button(L10n.string(.commonOK)) {
                 model.dismissFileOperationError()
             }
         } message: {
-            Text(model.fileOperationError ?? "未知错误")
+            Text(model.fileOperationError ?? L10n.string(.commonUnknownError))
         }
     }
 
@@ -93,7 +93,11 @@ struct SidebarView: View {
                             .foregroundStyle(theme.foreground)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(model.rootURL == nil ? "点击选择工作目录" : "工作目录 · 点击切换")
+                        Text(L10n.string(
+                            model.rootURL == nil
+                                ? .sidebarChooseWorkspace
+                                : .sidebarCurrentWorkspaceSwitch
+                        ))
                             .font(.system(size: 10.5))
                             .foregroundStyle(theme.secondary)
                     }
@@ -110,7 +114,7 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .focusable(false)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .help("切换工作目录")
+            .help(L10n.string(.sidebarSwitchHelp))
             .popover(isPresented: $workspaceSwitcherIsPresented, arrowEdge: .bottom) {
                 workspaceSwitcher
             }
@@ -125,7 +129,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(theme.secondary)
-                .help("重新加载目录（仅文件列表）")
+                .help(L10n.string(.sidebarReloadHelp))
             }
         }
         .padding(.horizontal, 12)
@@ -134,7 +138,7 @@ struct SidebarView: View {
 
     private var workspaceSwitcher: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("切换工作目录")
+            Text(L10n.string(.sidebarSwitchTitle))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(theme.foreground)
 
@@ -164,7 +168,7 @@ struct SidebarView: View {
 
             Divider().overlay(theme.divider.opacity(0.75))
 
-            Text("最近使用")
+            Text(L10n.string(.sidebarRecent))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(theme.secondary)
 
@@ -172,7 +176,7 @@ struct SidebarView: View {
                 $0.id != model.rootURL?.standardizedFileURL.path
             }
             if switchableWorkspaces.isEmpty {
-                Text("暂无其他最近目录")
+                Text(L10n.string(.sidebarNoOtherRecent))
                     .font(.system(size: 11.5))
                     .foregroundStyle(theme.secondary)
                     .padding(.vertical, 6)
@@ -196,13 +200,13 @@ struct SidebarView: View {
                         model.chooseFolder()
                     }
                 } label: {
-                    Label("打开其他目录…", systemImage: "folder.badge.plus")
+                    Label(L10n.string(.sidebarOpenOther), systemImage: "folder.badge.plus")
                 }
 
                 Spacer()
 
                 if !model.recentWorkspaces.isEmpty {
-                    Button("清除记录") {
+                    Button(L10n.string(.sidebarClearRecent)) {
                         model.clearRecentWorkspaces()
                     }
                         .foregroundStyle(theme.secondary)
@@ -257,10 +261,10 @@ struct SidebarView: View {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(theme.secondary.opacity(0.7))
-            Text("目录中的文件会显示在这里")
+            Text(L10n.string(.sidebarEmpty))
                 .font(.system(size: 12))
                 .foregroundStyle(theme.secondary)
-            Button("打开目录") {
+            Button(L10n.string(.sidebarOpenFolder)) {
                 model.chooseFolder()
             }
             .buttonStyle(.borderedProminent)

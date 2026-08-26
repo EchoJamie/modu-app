@@ -3,15 +3,15 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
-APP_DIR="$PROJECT_DIR/build/墨读.app"
+APP_DIR="$PROJECT_DIR/build/MoDu.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 ICON_SOURCE="$PROJECT_DIR/Config/AppIcon-1024.png"
 ICONSET_DIR="$PROJECT_DIR/build/AppIcon.iconset"
-MERMAID_RESOURCE_DIR="$PROJECT_DIR/Sources/MoDu/Resources/Mermaid"
+RESOURCE_BUNDLE_SOURCE="$PROJECT_DIR/.build/release/MoDu_MoDu.bundle"
 
 swift build --package-path "$PROJECT_DIR" -c release
 
-if [[ "$APP_DIR" != "$PROJECT_DIR/build/墨读.app" ]]; then
+if [[ "$APP_DIR" != "$PROJECT_DIR/build/MoDu.app" ]]; then
   print -u2 "拒绝清理非预期构建目录：$APP_DIR"
   exit 1
 fi
@@ -20,11 +20,16 @@ fi
 /bin/mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 /bin/cp "$PROJECT_DIR/.build/release/MoDu" "$CONTENTS_DIR/MacOS/MoDu"
 /bin/cp "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
-if [[ ! -f "$MERMAID_RESOURCE_DIR/mermaid.min.js" ]]; then
-  print -u2 "缺少离线 Mermaid 资源：$MERMAID_RESOURCE_DIR/mermaid.min.js"
+if [[ ! -d "$RESOURCE_BUNDLE_SOURCE" ]]; then
+  print -u2 "缺少 SwiftPM 资源包：$RESOURCE_BUNDLE_SOURCE"
   exit 1
 fi
-/bin/cp -R "$MERMAID_RESOURCE_DIR" "$CONTENTS_DIR/Resources/Mermaid"
+/usr/bin/ditto "$RESOURCE_BUNDLE_SOURCE" "$CONTENTS_DIR/Resources/MoDu_MoDu.bundle"
+for localization in en zh-Hans; do
+  /usr/bin/ditto \
+    "$PROJECT_DIR/Sources/MoDu/Resources/$localization.lproj" \
+    "$CONTENTS_DIR/Resources/$localization.lproj"
+done
 /usr/bin/printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 
 if [[ ! -f "$ICON_SOURCE" ]]; then
@@ -47,6 +52,7 @@ done
   --entitlements "$PROJECT_DIR/Config/MoDu.entitlements" \
   "$APP_DIR"
 
-"$CONTENTS_DIR/MacOS/MoDu" --webview-self-check
+"$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(en)' --webview-self-check
+"$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(zh-Hans)' --webview-self-check
 
 print "已构建：$APP_DIR"

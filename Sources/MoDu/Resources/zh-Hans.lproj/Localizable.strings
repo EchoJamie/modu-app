@@ -1,0 +1,112 @@
+"app.name" = "墨读";
+"common.ok" = "好";
+"common.unknownError" = "未知错误";
+
+"command.openFolder" = "打开目录…";
+"command.openRecent" = "打开最近使用的目录";
+"command.clearMenu" = "清除菜单";
+"command.reading" = "阅读";
+"command.reloadDocumentOutline" = "重新加载当前文档与大纲";
+"command.reloadDirectory" = "重新加载目录";
+"command.theme" = "主题";
+"command.displayMode" = "显示模式";
+"command.openSecondPane" = "打开第二阅读栏";
+"command.closeActivePane" = "关闭当前阅读栏";
+
+"outline.hide" = "隐藏大纲";
+"outline.show" = "显示大纲";
+"outline.title" = "大纲";
+"outline.empty" = "这篇文档没有标题";
+"outline.resizeHelp" = "拖动调整大纲宽度";
+"outline.resizeAccessibility" = "调整大纲宽度";
+
+"appearance.system" = "跟随系统";
+"appearance.light" = "明墨";
+"appearance.dark" = "暗墨";
+
+"theme.newsprint.name" = "纸页";
+"theme.newsprint.subtitle" = "宋体正文与纸张质感";
+"theme.minimal.name" = "极简";
+"theme.minimal.subtitle" = "留白充足的现代阅读";
+"theme.sepia.name" = "暖沙";
+"theme.sepia.subtitle" = "适合长时间阅读的暖色";
+"theme.dark.name" = "墨夜";
+"theme.dark.subtitle" = "克制的中性墨色界面";
+"theme.github.name" = "GitHub";
+"theme.github.subtitle" = "熟悉的技术文档排版";
+
+"error.outsideWorkspace" = "该文件不在当前工作目录中。";
+"error.unsupportedEncoding" = "无法识别这个文件的文本编码。";
+"error.emptyName" = "名称不能为空。";
+"error.nameSeparator" = "名称不能包含“/”。";
+"error.renameOutside" = "重命名后的项目必须保留在当前工作目录内。";
+"error.targetExists" = "同一目录中已存在同名项目。";
+"error.recentUnavailable" = "该最近目录已不可访问，已从列表中移除。";
+"error.bookmarkSave" = "无法保存最近目录访问权限：%@";
+"error.reloadDirectory" = "无法重新加载目录：%@";
+
+"workspace.notOpened" = "尚未打开目录";
+"document.loadFailed" = "读取失败";
+"folderPicker.title" = "选择文档目录";
+"folderPicker.message" = "选择一个目录以浏览、阅读和重命名其中的文件。";
+"folderPicker.prompt" = "打开";
+
+"sidebar.loading" = "正在读取目录…";
+"sidebar.privacyNote" = "本地管理 · 远程图片按需加载";
+"sidebar.operationFailed" = "操作失败";
+"sidebar.chooseWorkspace" = "点击选择工作目录";
+"sidebar.currentWorkspaceSwitch" = "工作目录 · 点击切换";
+"sidebar.switchHelp" = "切换工作目录";
+"sidebar.reloadHelp" = "重新加载目录（仅文件列表）";
+"sidebar.switchTitle" = "切换工作目录";
+"sidebar.recent" = "最近使用";
+"sidebar.noOtherRecent" = "暂无其他最近目录";
+"sidebar.openOther" = "打开其他目录…";
+"sidebar.clearRecent" = "清除记录";
+"sidebar.empty" = "目录中的文件会显示在这里";
+"sidebar.openFolder" = "打开目录";
+
+"document.closePane" = "关闭此栏";
+"document.loading" = "正在读取 %@…";
+"document.unsupportedTitle" = "暂不支持预览";
+"document.unsupportedMessage" = "%@ 不是支持的 Markdown 或 HTML 文件。";
+"document.failedTitle" = "读取失败";
+"welcome.title" = "选择一篇 Markdown 或 HTML 文档";
+"welcome.subtitle" = "本地管理，按需加载文档中的远程图片";
+"welcome.localRendering" = "本地渲染";
+"welcome.rename" = "目录内重命名";
+"welcome.splitReading" = "双栏阅读";
+
+"toolbar.reloadHelp" = "重新加载当前文档与大纲";
+"toolbar.openSplitHelp" = "打开第二阅读栏（⌘\\）";
+"toolbar.closeSplitHelp" = "关闭当前阅读栏（⌘\\）";
+"toolbar.displayModeHelp" = "显示模式：%@";
+"toolbar.themeHelp" = "主题：%@（同时应用于界面与正文）";
+
+"fileTree.openOtherPane" = "在另一栏打开";
+"fileTree.rename" = "重命名";
+"fileTree.returnKey" = "回车键";
+"fileTree.copyPath" = "复制绝对路径";
+"fileTree.namePlaceholder" = "名称";
+
+"metadata.aria" = "文档元数据";
+"metadata.title" = "文档信息";
+"metadata.count" = "%d 项";
+"metadata.expandFull" = "展开完整内容";
+"metadata.expandRemaining" = "展开其余 %d 项";
+"metadata.collapse" = "收起文档信息";
+
+"mermaid.sourceSummary" = "查看 Mermaid 源代码";
+"mermaid.ariaLabel" = "Mermaid 图表";
+"mermaid.limitStatus" = "图表数量或内容超过安全限制，已保留源代码而未执行渲染。";
+"mermaid.limitDetail" = "单图最多 %d 字节；每篇最多 %d 张、合计 %d 字节。";
+"mermaid.rendering" = "正在渲染 Mermaid 图表…";
+"mermaid.unable" = "无法渲染这张 Mermaid 图表。";
+"mermaid.offlineMissing" = "离线 Mermaid 组件未能加载。";
+"mermaid.syntax" = "请检查 Mermaid 语法。";
+"mermaid.failed" = "Mermaid 渲染失败。";
+
+"image.notLoaded" = "图片未加载";
+"image.withAlt" = "图片：%@";
+"webView.recoveryTitle" = "文档显示进程无法恢复";
+"webView.recoveryMessage" = "为避免反复占用内存，墨读已停止自动重载。请使用右上角刷新按钮重试。";

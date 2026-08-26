@@ -232,7 +232,7 @@ private struct FileTreeRow: View {
                         Button {
                             model.openInOtherPane(node)
                         } label: {
-                            contextMenuLabel("在另一栏打开", shortcut: "⌥↩")
+                            contextMenuLabel(L10n.string(.fileTreeOpenOtherPane), shortcut: "⌥↩")
                         }
 
                         Divider()
@@ -241,13 +241,16 @@ private struct FileTreeRow: View {
                     Button {
                         onBeginRename(node)
                     } label: {
-                        contextMenuLabel("重命名", shortcut: "回车键")
+                        contextMenuLabel(
+                            L10n.string(.fileTreeRename),
+                            shortcut: L10n.string(.fileTreeReturnKey)
+                        )
                     }
 
                     Button {
                         model.copyAbsolutePath(of: node)
                     } label: {
-                        contextMenuLabel("复制绝对路径", shortcut: "⌘C")
+                        contextMenuLabel(L10n.string(.fileTreeCopyPath), shortcut: "⌘C")
                     }
                 }
             }
@@ -289,7 +292,7 @@ private struct FileTreeRow: View {
                 .frame(width: 16)
 
             if editingNodeID == node.id {
-                TextField("名称", text: $renameDraft)
+                TextField(L10n.string(.fileTreeNamePlaceholder), text: $renameDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: node.isPreviewable ? .medium : .regular))
                     .foregroundStyle(theme.foreground)

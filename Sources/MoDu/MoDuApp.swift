@@ -151,6 +151,7 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
           readyCount: document.querySelectorAll('.mermaid-diagram.is-ready svg').length,
           failedCount: document.querySelectorAll('.mermaid-diagram.is-error').length,
           generation: window.__moduMermaidGeneration || 0,
+          failedStatus: document.querySelector('.mermaid-diagram.is-error .mermaid-status')?.textContent || '',
           detail: document.querySelector('.mermaid-error-detail')?.textContent || ''
         }))()
         """
@@ -165,6 +166,10 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             let failedCount = result?["failedCount"] as? Int ?? 0
             let generation = result?["generation"] as? Int ?? 0
             if readyCount == 2, failedCount == 1 {
+                guard result?["failedStatus"] as? String == L10n.string(.mermaidUnable) else {
+                    self.finish(success: false, message: "WKWebView Mermaid 状态文字未跟随应用语言")
+                    return
+                }
                 if self.darkRerenderRequested, generation >= 2 {
                     self.startFrontMatterCheck()
                     return
@@ -237,6 +242,9 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
           const collapseLabelVisible = getComputedStyle(document.querySelector('.front-matter-collapse')).display !== 'none';
           if (details) details.open = false;
           return {
+            htmlLanguage: document.documentElement.lang,
+            metadataTitle: document.querySelector('.front-matter-title')?.textContent || '',
+            expandLabel: document.querySelector('.front-matter-expand')?.textContent || '',
             rowCount: document.querySelectorAll('.front-matter-row').length,
             initiallyClosed,
             initiallyClamped,
@@ -254,7 +262,10 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
                 return
             }
             let result = value as? [String: Any]
-            let passed = result?["rowCount"] as? Int == 6 &&
+            let passed = result?["htmlLanguage"] as? String == L10n.htmlLanguageCode &&
+                result?["metadataTitle"] as? String == L10n.string(.metadataTitle) &&
+                result?["expandLabel"] as? String == L10n.format(.metadataExpandRemaining, 2) &&
+                result?["rowCount"] as? Int == 6 &&
                 result?["initiallyClosed"] as? Bool == true &&
                 result?["initiallyClamped"] as? Bool == true &&
                 result?["expanded"] as? Bool == true &&
@@ -307,7 +318,8 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             heading: document.querySelector('h1')?.textContent || '',
             imageReady: Boolean(image?.complete && image?.naturalWidth > 0),
             scriptBlocked: window.moduUnsafeScriptExecuted !== true,
-            cardBorder: card ? getComputedStyle(card).borderTopWidth : ''
+            cardBorder: card ? getComputedStyle(card).borderTopWidth : '',
+            htmlLanguage: document.documentElement.lang
           };
         })()
         """
@@ -322,7 +334,14 @@ private final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             let imageReady = result?["imageReady"] as? Bool ?? false
             let scriptBlocked = result?["scriptBlocked"] as? Bool ?? false
             let cardBorder = result?["cardBorder"] as? String
-            if heading == "HTML 实机检查", imageReady, scriptBlocked, cardBorder == "3px" {
+            let htmlLanguage = result?["htmlLanguage"] as? String
+            if
+                heading == "HTML 实机检查",
+                imageReady,
+                scriptBlocked,
+                cardBorder == "3px",
+                htmlLanguage == L10n.htmlLanguageCode
+            {
                 self.finish(
                     success: true,
                     message: "WKWebView 已验证离线 Mermaid、metadata 折叠交互与安全 HTML 预览"
@@ -376,7 +395,7 @@ struct MoDuApp: App {
     @StateObject private var model = ReaderViewModel()
 
     var body: some Scene {
-        WindowGroup("墨读") {
+        WindowGroup(L10n.string(.appName)) {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(model.appAppearance.preferredColorScheme)
@@ -385,13 +404,13 @@ struct MoDuApp: App {
         .defaultSize(width: 1440, height: 860)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("打开目录…") {
+                Button(L10n.string(.commandOpenFolder)) {
                     model.chooseFolder()
                 }
                 .keyboardShortcut("o", modifiers: .command)
 
                 if !model.recentWorkspaces.isEmpty {
-                    Menu("打开最近使用的目录") {
+                    Menu(L10n.string(.commandOpenRecent)) {
                         ForEach(model.recentWorkspaces) { workspace in
                             Button(workspace.name) {
                                 model.openRecentWorkspace(workspace)
@@ -402,21 +421,21 @@ struct MoDuApp: App {
 
                         Divider()
 
-                        Button("清除菜单") {
+                        Button(L10n.string(.commandClearMenu)) {
                             model.clearRecentWorkspaces()
                         }
                     }
                 }
             }
 
-            CommandMenu("阅读") {
-                Button("重新加载当前文档与大纲") {
+            CommandMenu(L10n.string(.commandReading)) {
+                Button(L10n.string(.commandReloadDocumentOutline)) {
                     model.reloadActiveDocument()
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(!model.canReloadActiveDocument)
 
-                Button("重新加载目录") {
+                Button(L10n.string(.commandReloadDirectory)) {
                     model.rescanWorkspace()
                 }
                 .keyboardShortcut("r", modifiers: [.command, .option])
@@ -424,7 +443,7 @@ struct MoDuApp: App {
 
                 Divider()
 
-                Menu("主题") {
+                Menu(L10n.string(.commandTheme)) {
                     ForEach(MarkdownStyle.allCases) { style in
                         Button(style.name) {
                             model.selectMarkdownStyle(style)
@@ -432,7 +451,7 @@ struct MoDuApp: App {
                     }
                 }
 
-                Menu("显示模式") {
+                Menu(L10n.string(.commandDisplayMode)) {
                     ForEach(AppAppearance.allCases) { appearance in
                         Button(appearance.name) {
                             model.selectAppAppearance(appearance)
@@ -442,15 +461,16 @@ struct MoDuApp: App {
 
                 Divider()
 
-                if model.hasSecondPane {
-                    Button("关闭活动阅读栏") {
-                        model.closePane(model.activePane)
-                    }
-
-                    Divider()
+                Button(L10n.string(model.hasSecondPane
+                    ? .commandCloseActivePane
+                    : .commandOpenSecondPane)) {
+                    model.toggleSplitReading()
                 }
+                .keyboardShortcut("\\", modifiers: .command)
 
-                Button(model.outlineIsVisible ? "隐藏大纲" : "显示大纲") {
+                Divider()
+
+                Button(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow)) {
                     model.outlineIsVisible.toggle()
                 }
                 .keyboardShortcut("0", modifiers: [.command, .option])

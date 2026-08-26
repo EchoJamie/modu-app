@@ -30,12 +30,12 @@ private enum ReaderFileOperationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .emptyName: "名称不能为空。"
-        case .nameContainsSeparator: "名称不能包含“/”。"
-        case .targetOutsideWorkspace: "重命名后的项目必须保留在当前工作目录内。"
-        case .targetAlreadyExists: "同一目录中已存在同名项目。"
-        case .workspaceUnavailable: "该最近目录已不可访问，已从列表中移除。"
-        case .bookmarkCreationFailed(let message): "无法保存最近目录访问权限：\(message)"
+        case .emptyName: L10n.string(.errorEmptyName)
+        case .nameContainsSeparator: L10n.string(.errorNameSeparator)
+        case .targetOutsideWorkspace: L10n.string(.errorRenameOutside)
+        case .targetAlreadyExists: L10n.string(.errorTargetExists)
+        case .workspaceUnavailable: L10n.string(.errorRecentUnavailable)
+        case .bookmarkCreationFailed(let message): L10n.format(.errorBookmarkSave, message)
         }
     }
 }
@@ -115,7 +115,7 @@ final class ReaderViewModel: ObservableObject {
         referenceDocumentTask?.cancel()
     }
 
-    var rootName: String { rootURL?.lastPathComponent ?? "尚未打开目录" }
+    var rootName: String { rootURL?.lastPathComponent ?? L10n.string(.workspaceNotOpened) }
     var hasSecondPane: Bool { referenceDocumentState != nil }
     var currentTitle: String { currentTitle(for: activePane) }
     var resolvedTheme: ResolvedReaderTheme {
@@ -134,8 +134,8 @@ final class ReaderViewModel: ObservableObject {
     func currentTitle(for pane: ReaderPaneID) -> String {
         switch documentState(for: pane) {
         case .loaded(let url, _), .loading(let url), .unsupported(let url): url.lastPathComponent
-        case .failed(let url, _): url?.lastPathComponent ?? "读取失败"
-        case .welcome: "墨读"
+        case .failed(let url, _): url?.lastPathComponent ?? L10n.string(.documentLoadFailed)
+        case .welcome: L10n.string(.appName)
         }
     }
 
@@ -167,9 +167,9 @@ final class ReaderViewModel: ObservableObject {
 
     func chooseFolder() {
         let panel = NSOpenPanel()
-        panel.title = "选择文档目录"
-        panel.message = "选择一个目录以浏览、阅读和重命名其中的文件。"
-        panel.prompt = "打开"
+        panel.title = L10n.string(.folderPickerTitle)
+        panel.message = L10n.string(.folderPickerMessage)
+        panel.prompt = L10n.string(.folderPickerPrompt)
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
@@ -292,7 +292,7 @@ final class ReaderViewModel: ObservableObject {
                     self.treeGeneration == treeToken
                 else { return }
                 self.rootIsLoading = false
-                self.fileOperationError = "无法重新加载目录：\(error.localizedDescription)"
+                self.fileOperationError = L10n.format(.errorReloadDirectory, error.localizedDescription)
                 self.rootTask = nil
             }
         }
@@ -367,6 +367,19 @@ final class ReaderViewModel: ObservableObject {
         let targetPane = hasSecondPane ? activePane.otherPane : .reference
         activePane = targetPane
         loadDocumentOrUnsupported(at: node.url, in: targetPane)
+    }
+
+    func toggleSplitReading() {
+        if hasSecondPane {
+            closePane(activePane)
+            return
+        }
+
+        referenceDocumentTask?.cancel()
+        referenceDocumentGeneration = UUID()
+        clearSecondPaneState()
+        referenceDocumentState = .welcome
+        activePane = .reference
     }
 
     func closePane(_ pane: ReaderPaneID) {

@@ -43,7 +43,7 @@ final class HTMLDocumentRenderer {
 
         let html = """
         <!doctype html>
-        <html lang="zh-CN">
+        <html lang="\(L10n.htmlLanguageCode)">
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

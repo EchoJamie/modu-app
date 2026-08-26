@@ -79,10 +79,34 @@ enum SelfCheck {
             }
             let rendered = renderedDocuments[0]
 
+            let missingLocalizations = L10n.supportedLanguages.flatMap { language in
+                L10n.Key.allCases.compactMap { key in
+                    let value = L10n.string(key, language: language)
+                    return value.isEmpty || value == key.rawValue ? "\(language):\(key.rawValue)" : nil
+                }
+            }
+            check(missingLocalizations.isEmpty, "英文与简体中文本地化键完整")
+            check(
+                L10n.string(.appName, language: "en") == "MoDu" &&
+                    L10n.string(.appName, language: "zh-Hans") == "墨读",
+                "应用名称可按语言显示为 MoDu 或墨读"
+            )
+            if
+                let languageIndex = CommandLine.arguments.firstIndex(of: "-AppleLanguages"),
+                CommandLine.arguments.indices.contains(languageIndex + 1)
+            {
+                let requestedLanguage = CommandLine.arguments[languageIndex + 1].lowercased()
+                let expectedName = requestedLanguage.contains("zh") ? "墨读" : "MoDu"
+                check(
+                    L10n.string(.appName) == expectedName,
+                    "应用名称跟随当前 macOS 应用语言"
+                )
+            }
             check(renderedDocuments.count == 10 && renderedDocuments.allSatisfy { !$0.html.isEmpty }, "五套主题的明墨与暗墨模式均可渲染")
+            check(rendered.html.contains("<html lang=\"\(L10n.htmlLanguageCode)\">"), "Markdown 页面语言跟随应用语言")
             check(rendered.html.contains("class=\"front-matter is-collapsible\""), "文档顶部 YAML 渲染为独立的可折叠元数据区")
             check(rendered.html.contains("<dt>name</dt>") && rendered.html.contains("<dd>sample-skill</dd>"), "元数据按 key/value 语义结构对齐渲染")
-            check(rendered.html.contains("展开其余 2 项") && rendered.html.contains("<details class=\"front-matter-more\">"), "较多元数据默认只展示前四项")
+            check(rendered.html.contains(L10n.format(.metadataExpandRemaining, 2)) && rendered.html.contains("<details class=\"front-matter-more\">"), "较多元数据默认只展示前四项")
             check(rendered.html.contains("多行文档元数据。"), "YAML 折叠文本合并为紧凑的元数据值")
             check(rendered.html.contains("&lt;script&gt;alert('metadata')&lt;/script&gt;"), "元数据值在进入页面前完成 HTML 转义")
             check(!rendered.html.contains("<p>name: sample-skill</p>") && !rendered.html.contains("<hr>\n<p>name:"), "YAML 分隔符与内容不再混入 Markdown 正文")
@@ -104,12 +128,12 @@ enum SelfCheck {
             check(rendered.html.contains("<pre data-language=\"swift\"><code"), "代码块保留语言结构")
             check(rendered.html.contains("class=\"mermaid-diagram is-rendering\""), "Mermaid fenced code block 生成独立图表容器")
             check(rendered.html.contains("data-mermaid-renderable=\"true\""), "Mermaid 图表进入离线渲染队列")
-            check(rendered.html.contains("flowchart LR") && rendered.html.contains("查看 Mermaid 源代码"), "Mermaid 图表保留安全转义的本地回退内容")
+            check(rendered.html.contains("flowchart LR") && rendered.html.contains(L10n.string(.mermaidSourceSummary)), "Mermaid 图表保留安全转义的本地回退内容")
             check(rendered.html.contains("width: min(1600px, calc(100vw - 72px))"), "Mermaid 图表优先利用阅读区宽度")
             check(!rendered.html.contains("data-language=\"mermaid\""), "Mermaid fenced code block 不按普通代码块展示")
             check(rendered.html.contains("a code { padding: 0; background: none"), "链接内代码不叠加背景")
             check(rendered.html.contains("<img src=\"https://example.com/tracker.png\" alt=\"远程图片\" loading=\"lazy\" referrerpolicy=\"no-referrer\">"), "HTTP/HTTPS 远程图片进入页面资源")
-            check(!rendered.html.contains("图片：远程图片"), "HTTP/HTTPS 远程图片不再显示占位说明")
+            check(!rendered.html.contains(L10n.format(.imageWithAlt, "远程图片")), "HTTP/HTTPS 远程图片不再显示占位说明")
             check(!rendered.html.contains("<script src=\"https://example.com/leak.js\""), "原始 HTML 不会直接执行")
             check(rendered.html.contains("&lt;script src="), "原始 HTML 以文本方式展示")
             check(rendered.html.contains("img-src data: modu-resource: http: https:"), "页面内容安全策略仅为图片放开 HTTP/HTTPS")
@@ -215,7 +239,7 @@ enum SelfCheck {
                 forResource: "ORIGIN",
                 withExtension: "md",
                 subdirectory: "Mermaid"
-            ) ?? Bundle.module.url(
+            ) ?? AppResources.bundle.url(
                 forResource: "ORIGIN",
                 withExtension: "md",
                 subdirectory: "Mermaid"

@@ -39,7 +39,20 @@ struct RootView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(!model.canReloadActiveDocument)
-                .help("重新加载当前文档与大纲")
+                .help(L10n.string(.toolbarReloadHelp))
+
+                Button {
+                    model.toggleSplitReading()
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                        .symbolVariant(model.hasSecondPane ? .fill : .none)
+                }
+                .help(L10n.string(model.hasSecondPane
+                    ? .toolbarCloseSplitHelp
+                    : .toolbarOpenSplitHelp))
+                .accessibilityLabel(L10n.string(model.hasSecondPane
+                    ? .commandCloseActivePane
+                    : .commandOpenSecondPane))
 
                 themeMenu
                 displayModeMenu
@@ -50,7 +63,7 @@ struct RootView: View {
                     Image(systemName: "sidebar.right")
                         .symbolVariant(model.outlineIsVisible ? .fill : .none)
                 }
-                .help(model.outlineIsVisible ? "隐藏大纲" : "显示大纲")
+                .help(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
             }
         }
         .tint(theme.accent)
@@ -106,7 +119,7 @@ struct RootView: View {
         } label: {
             Image(systemName: model.appAppearance.symbol)
         }
-        .help("显示模式：\(model.appAppearance.name)")
+        .help(L10n.format(.toolbarDisplayModeHelp, model.appAppearance.name))
     }
 
     private var themeMenu: some View {
@@ -130,7 +143,7 @@ struct RootView: View {
         } label: {
             Image(systemName: model.markdownStyle.symbol)
         }
-        .help("主题：\(model.markdownStyle.name)（同时应用于界面与正文）")
+        .help(L10n.format(.toolbarThemeHelp, model.markdownStyle.name))
     }
 }
 
