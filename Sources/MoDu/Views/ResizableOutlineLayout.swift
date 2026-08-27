@@ -54,18 +54,19 @@ struct ResizableOutlineLayout<Content: View, Outline: View>: View {
                     )
 
                 if outlineIsVisible {
-                    OutlineResizeHandle(
-                        preferredWidth: $preferredOutlineWidth,
-                        displayedWidth: displayedWidth,
-                        minimumWidth: minimumOutlineWidth,
-                        maximumWidth: availableMaximum,
-                        dividerColor: dividerColor,
-                        onCommit: onOutlineWidthCommit
-                    )
-
                     outline
                         .frame(width: displayedWidth)
                         .frame(maxHeight: .infinity)
+                        .overlay(alignment: .leading) {
+                            OutlineResizeHandle(
+                                preferredWidth: $preferredOutlineWidth,
+                                displayedWidth: displayedWidth,
+                                minimumWidth: minimumOutlineWidth,
+                                maximumWidth: availableMaximum,
+                                dividerColor: dividerColor,
+                                onCommit: onOutlineWidthCommit
+                            )
+                        }
                 }
             }
         }
@@ -74,7 +75,6 @@ struct ResizableOutlineLayout<Content: View, Outline: View>: View {
     private func maximumAvailableOutlineWidth(totalWidth: CGFloat) -> CGFloat {
         let available = totalWidth
             - minimumContentWidth
-            - OutlineResizeHandle.hitWidth
         return min(maximumOutlineWidth, max(minimumOutlineWidth, available))
     }
 }
@@ -96,7 +96,7 @@ private struct OutlineResizeHandle: View {
         Rectangle()
             .fill(.clear)
             .frame(width: Self.hitWidth)
-            .overlay {
+            .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(dividerColor.opacity(0.75))
                     .frame(width: 1)

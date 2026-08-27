@@ -24,4 +24,8 @@ trap cleanup EXIT
   -format UDZO \
   "$DMG_PATH"
 
+dmg_sha="$(/usr/bin/shasum -a 256 "$DMG_PATH" | /usr/bin/awk '{print $1}')"
+print "dmg_sha256=$dmg_sha" >> "$PROJECT_DIR/build/release-manifest.txt"
+print "dmg_path=build/${DMG_PATH:t}" >> "$PROJECT_DIR/build/release-manifest.txt"
+
 print "已生成：$DMG_PATH"

@@ -2,7 +2,13 @@
 * text=auto
 
 # Bundled third-party distribution artifact; review its version and checksum via ORIGIN.md.
-Sources/MoDu/Resources/Mermaid/mermaid.min.js -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Mermaid/mermaid.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/highlight.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/dockerfile.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/groovy.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/gradle.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/properties.min.js -text -diff -whitespace linguist-vendored
+Sources/MoDu/Resources/Highlighter/toml.min.js text eol=lf
 
 # Binary application artwork.
 Config/AppIcon-1024.png binary

@@ -8,8 +8,38 @@ CONTENTS_DIR="$APP_DIR/Contents"
 ICON_SOURCE="$PROJECT_DIR/Config/AppIcon-1024.png"
 ICONSET_DIR="$PROJECT_DIR/build/AppIcon.iconset"
 RESOURCE_BUNDLE_SOURCE="$PROJECT_DIR/.build/release/MoDu_MoDu.bundle"
+LICENSE_DIR="$CONTENTS_DIR/Resources/ThirdPartyLicenses"
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(/usr/bin/git -C "$PROJECT_DIR" show -s --format=%ct HEAD)}"
 
-swift build --package-path "$PROJECT_DIR" -c release
+if [[ -n "$(/usr/bin/git -C "$PROJECT_DIR" status --porcelain --untracked-files=all)" &&
+      "${ALLOW_DIRTY_BUILD:-0}" != "1" ]]; then
+  print -u2 "正式交付拒绝 dirty 工作树；依赖解析前终止。"
+  exit 1
+fi
+
+swift package --package-path "$PROJECT_DIR" resolve
+
+"$SCRIPT_DIR/verify_release.sh"
+initial_source_fingerprint="$("$SCRIPT_DIR/source_state_fingerprint.sh")"
+initial_dependency_fingerprint="$("$SCRIPT_DIR/dependency_state_fingerprint.sh")"
+
+verify_source_state() {
+  current_source_fingerprint="$("$SCRIPT_DIR/source_state_fingerprint.sh")"
+  if [[ "$current_source_fingerprint" != "$initial_source_fingerprint" ]]; then
+    print -u2 "构建期间源码状态发生变化；拒绝生成不可追溯交付物。"
+    exit 1
+  fi
+  current_dependency_fingerprint="$("$SCRIPT_DIR/dependency_state_fingerprint.sh")"
+  if [[ "$current_dependency_fingerprint" != "$initial_dependency_fingerprint" ]]; then
+    print -u2 "构建期间 SwiftPM 依赖状态发生变化；拒绝生成不可追溯交付物。"
+    exit 1
+  fi
+  "$SCRIPT_DIR/verify_release.sh"
+}
+
+swift test --package-path "$PROJECT_DIR" -Xswiftc -warnings-as-errors
+swift build --package-path "$PROJECT_DIR" -c release -Xswiftc -warnings-as-errors
+verify_source_state
 
 if [[ "$APP_DIR" != "$PROJECT_DIR/build/MoDu.app" ]]; then
   print -u2 "拒绝清理非预期构建目录：$APP_DIR"
@@ -25,6 +55,9 @@ if [[ ! -d "$RESOURCE_BUNDLE_SOURCE" ]]; then
   exit 1
 fi
 /usr/bin/ditto "$RESOURCE_BUNDLE_SOURCE" "$CONTENTS_DIR/Resources/MoDu_MoDu.bundle"
+/bin/mkdir -p "$LICENSE_DIR"
+/bin/cp "$PROJECT_DIR/THIRD_PARTY_NOTICES.md" "$CONTENTS_DIR/Resources/THIRD_PARTY_NOTICES.md"
+"$SCRIPT_DIR/copy_third_party_licenses.sh" "$LICENSE_DIR"
 for localization in en zh-Hans; do
   /usr/bin/ditto \
     "$PROJECT_DIR/Sources/MoDu/Resources/$localization.lproj" \
@@ -46,6 +79,8 @@ done
 /usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$CONTENTS_DIR/Resources/AppIcon.icns"
 /bin/rm -rf "$ICONSET_DIR"
 
+"$SCRIPT_DIR/write_release_manifest.sh" prepare "$APP_DIR"
+
 /usr/bin/codesign \
   --force \
   --sign - \
@@ -54,5 +89,7 @@ done
 
 "$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(en)' --webview-self-check
 "$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(zh-Hans)' --webview-self-check
+verify_source_state
+"$SCRIPT_DIR/write_release_manifest.sh" finalize "$APP_DIR"
 
 print "已构建：$APP_DIR"

@@ -23,9 +23,18 @@ let package = Package(
             path: "Sources/MoDu",
             resources: [
                 .copy("Resources/Mermaid"),
+                .copy("Resources/Highlighter"),
                 .process("Resources/en.lproj"),
                 .process("Resources/zh-Hans.lproj")
             ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
+        .testTarget(
+            name: "MoDuTests",
+            dependencies: ["MoDu"],
+            path: "Tests/MoDuTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]

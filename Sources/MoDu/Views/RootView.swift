@@ -118,14 +118,10 @@ struct RootView: View {
     private var displayModeMenu: some View {
         Menu {
             ForEach(AppAppearance.allCases) { appearance in
-                Button {
-                    model.selectAppAppearance(appearance)
-                } label: {
+                Toggle(isOn: appearanceSelection(appearance)) {
                     Label(
                         appearance.name,
-                        systemImage: model.appAppearance == appearance
-                            ? "checkmark.circle.fill"
-                            : appearance.symbol
+                        systemImage: appearance.symbol
                     )
                 }
             }
@@ -139,18 +135,14 @@ struct RootView: View {
     private var themeMenu: some View {
         Menu {
             ForEach(MarkdownStyle.allCases) { style in
-                Button {
-                    model.selectMarkdownStyle(style)
-                } label: {
+                Toggle(isOn: themeSelection(style)) {
                     Label {
                         VStack(alignment: .leading) {
                             Text(style.name)
                             Text(style.subtitle)
                         }
                     } icon: {
-                        Image(systemName: model.markdownStyle == style
-                            ? "checkmark.circle.fill"
-                            : style.symbol)
+                        Image(systemName: style.symbol)
                     }
                 }
             }
@@ -159,6 +151,26 @@ struct RootView: View {
         }
         .focusable(false)
         .help(L10n.format(.toolbarThemeHelp, model.markdownStyle.name))
+    }
+
+    private func appearanceSelection(_ appearance: AppAppearance) -> Binding<Bool> {
+        Binding(
+            get: { model.appAppearance == appearance },
+            set: { isSelected in
+                guard isSelected else { return }
+                model.selectAppAppearance(appearance)
+            }
+        )
+    }
+
+    private func themeSelection(_ style: MarkdownStyle) -> Binding<Bool> {
+        Binding(
+            get: { model.markdownStyle == style },
+            set: { isSelected in
+                guard isSelected else { return }
+                model.selectMarkdownStyle(style)
+            }
+        )
     }
 }
 

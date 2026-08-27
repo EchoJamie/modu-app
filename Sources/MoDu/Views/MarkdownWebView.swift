@@ -3,20 +3,28 @@ import SwiftUI
 import WebKit
 
 struct MarkdownWebView: NSViewRepresentable {
-    let document: RenderedMarkdown
+    let document: RenderedDocument
     let documentURL: URL
     let rootURL: URL
     let style: ResolvedReaderTheme
     let scrollRequest: ScrollRequest?
-    let onOpenMarkdown: (URL, String?) -> Void
+    let findRequest: DocumentSearchRequest?
+    let sourceViewportUpdates: [SourceViewportUpdate]
+    let onOpenDocument: (URL, String?) -> Void
     let onActiveHeading: (String?) -> Void
+    let onFindResult: (UUID, Bool) -> Void
+    let onSourceBoundary: (SourceViewportDirection, Int) -> Void
+    let onSourceVisiblePage: (Int) -> Void
     let onFocus: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             rootURL: rootURL,
-            onOpenMarkdown: onOpenMarkdown,
-            onActiveHeading: onActiveHeading
+            onOpenDocument: onOpenDocument,
+            onActiveHeading: onActiveHeading,
+            onFindResult: onFindResult,
+            onSourceBoundary: onSourceBoundary,
+            onSourceVisiblePage: onSourceVisiblePage
         )
     }
 
@@ -27,15 +35,19 @@ struct MarkdownWebView: NSViewRepresentable {
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.setURLSchemeHandler(
             context.coordinator.resourceHandler,
-            forURLScheme: MarkdownRenderer.resourceScheme
+            forURLScheme: LocalDocumentResourcePolicy.resourceScheme
         )
         configuration.setURLSchemeHandler(
             context.coordinator.bundledAssetHandler,
-            forURLScheme: MarkdownRenderer.bundledAssetScheme
+            forURLScheme: LocalDocumentResourcePolicy.bundledAssetScheme
         )
         configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: context.coordinator),
             name: Coordinator.outlineMessageName
+        )
+        configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: context.coordinator),
+            name: Coordinator.sourceViewportMessageName
         )
 
         let webView = FocusReportingWebView(frame: .zero, configuration: configuration)
@@ -54,8 +66,11 @@ struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.lastDocumentURL = documentURL
         context.coordinator.lastRootURL = rootURL
         context.coordinator.lastDocumentHTML = document.html
+        context.coordinator.lastInteractiveHTMLFallback = document.interactiveHTMLFallback
         context.coordinator.lastOutline = document.outline
         context.coordinator.renderingMode = document.renderingMode
+        context.coordinator.sourceSelection = document.sourcePage?.selectedRange
+        context.coordinator.sourceSelectionPageIndex = document.sourcePage?.page.index
         context.coordinator.lastStyle = style
         context.coordinator.webContentRecoveryCount = 0
         context.coordinator.resourceHandler.rootURL = rootURL
@@ -64,8 +79,11 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.onOpenMarkdown = onOpenMarkdown
+        context.coordinator.onOpenDocument = onOpenDocument
         context.coordinator.onActiveHeading = onActiveHeading
+        context.coordinator.onFindResult = onFindResult
+        context.coordinator.onSourceBoundary = onSourceBoundary
+        context.coordinator.onSourceVisiblePage = onSourceVisiblePage
         (webView as? FocusReportingWebView)?.onFocus = onFocus
         context.coordinator.resourceHandler.rootURL = rootURL
         webView.underPageBackgroundColor = document.renderingMode == .interactiveHTML
@@ -77,18 +95,27 @@ struct MarkdownWebView: NSViewRepresentable {
             context.coordinator.lastDocumentURL = documentURL
             context.coordinator.lastRootURL = rootURL
             context.coordinator.lastDocumentHTML = document.html
+            context.coordinator.lastInteractiveHTMLFallback = document.interactiveHTMLFallback
             context.coordinator.lastOutline = document.outline
             context.coordinator.renderingMode = document.renderingMode
+            context.coordinator.sourceSelection = document.sourcePage?.selectedRange
+            context.coordinator.sourceSelectionPageIndex = document.sourcePage?.page.index
             context.coordinator.lastStyle = style
             context.coordinator.lastScrollID = nil
+            context.coordinator.lastFindRequestID = nil
+            context.coordinator.resetSourceViewportUpdates()
             context.coordinator.lastReportedAnchor = nil
             context.coordinator.webContentRecoveryCount = 0
             context.coordinator.pendingAnchor = scrollRequest?.anchor
+            context.coordinator.pendingFindRequest = nil
             context.coordinator.loadCurrentDocument(in: webView)
         } else if context.coordinator.lastStyle != style {
             context.coordinator.lastStyle = style
-            if document.renderingMode == .styledDocument {
+            switch document.renderingMode {
+            case .styledDocument, .sourceCode, .image:
                 context.coordinator.apply(style: style, to: webView)
+            case .interactiveHTML:
+                break
             }
         }
 
@@ -100,6 +127,20 @@ struct MarkdownWebView: NSViewRepresentable {
                 context.coordinator.scroll(to: scrollRequest.anchor, in: webView)
             }
         }
+
+        if let findRequest, context.coordinator.lastFindRequestID != findRequest.id {
+            context.coordinator.lastFindRequestID = findRequest.id
+            if Coordinator.shouldDeferFind(
+                webViewIsLoading: webView.isLoading,
+                isDocumentReady: context.coordinator.isDocumentReady
+            ) {
+                context.coordinator.pendingFindRequest = findRequest
+            } else {
+                context.coordinator.find(findRequest, in: webView)
+            }
+        }
+
+        context.coordinator.apply(sourceViewportUpdates, to: webView)
     }
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -108,10 +149,19 @@ struct MarkdownWebView: NSViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: Coordinator.outlineMessageName
         )
-        coordinator.onOpenMarkdown = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: Coordinator.sourceViewportMessageName
+        )
+        coordinator.onOpenDocument = nil
         coordinator.onActiveHeading = nil
+        coordinator.onFindResult = nil
+        coordinator.onSourceBoundary = nil
+        coordinator.onSourceVisiblePage = nil
         coordinator.pendingAnchor = nil
+        coordinator.pendingFindRequest = nil
+        coordinator.pendingSourceViewportUpdates = []
         coordinator.lastDocumentHTML = nil
+        coordinator.lastInteractiveHTMLFallback = nil
         coordinator.lastOutline = []
         (webView as? FocusReportingWebView)?.onFocus = nil
     }
@@ -119,47 +169,72 @@ struct MarkdownWebView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         static let outlineMessageName = "moduOutline"
+        static let sourceViewportMessageName = "moduSourceViewport"
 
         let resourceHandler: LocalResourceSchemeHandler
         let bundledAssetHandler = BundledAssetSchemeHandler()
-        var onOpenMarkdown: ((URL, String?) -> Void)?
+        var onOpenDocument: ((URL, String?) -> Void)?
         var onActiveHeading: ((String?) -> Void)?
+        var onFindResult: ((UUID, Bool) -> Void)?
+        var onSourceBoundary: ((SourceViewportDirection, Int) -> Void)?
+        var onSourceVisiblePage: ((Int) -> Void)?
         var lastDocumentID: UUID?
         var lastDocumentURL: URL?
         var lastRootURL: URL?
         var lastDocumentHTML: String?
+        var lastInteractiveHTMLFallback: String?
         var lastOutline: [OutlineItem] = []
         var renderingMode: ReaderDocumentRenderingMode = .styledDocument
+        var sourceSelection: NSRange?
+        var sourceSelectionPageIndex: Int?
         var lastStyle: ResolvedReaderTheme?
         var lastScrollID: UUID?
+        var lastFindRequestID: UUID?
         var pendingAnchor: String?
+        var pendingFindRequest: DocumentSearchRequest?
+        var pendingSourceViewportUpdates: [SourceViewportUpdate] = []
+        var completedSourceViewportUpdateIDs: Set<UUID> = []
+        var completedSourceViewportUpdateOrder: [UUID] = []
+        var isApplyingSourceViewportUpdate = false
         var lastReportedAnchor: String?
         var webContentRecoveryCount = 0
         var interactiveLoadFinished = false
         var isDisplayingHTMLFallback = false
+        var isDocumentReady = false
         private static let maximumWebContentRecoveries = 1
+
+        static func shouldDeferFind(webViewIsLoading: Bool, isDocumentReady: Bool) -> Bool {
+            webViewIsLoading || !isDocumentReady
+        }
 
         init(
             rootURL: URL,
-            onOpenMarkdown: @escaping (URL, String?) -> Void,
-            onActiveHeading: @escaping (String?) -> Void
+            onOpenDocument: @escaping (URL, String?) -> Void,
+            onActiveHeading: @escaping (String?) -> Void,
+            onFindResult: @escaping (UUID, Bool) -> Void,
+            onSourceBoundary: @escaping (SourceViewportDirection, Int) -> Void,
+            onSourceVisiblePage: @escaping (Int) -> Void
         ) {
             resourceHandler = LocalResourceSchemeHandler(rootURL: rootURL)
-            self.onOpenMarkdown = onOpenMarkdown
+            self.onOpenDocument = onOpenDocument
             self.onActiveHeading = onActiveHeading
+            self.onFindResult = onFindResult
+            self.onSourceBoundary = onSourceBoundary
+            self.onSourceVisiblePage = onSourceVisiblePage
         }
 
         func loadCurrentDocument(in webView: WKWebView) {
             webView.stopLoading()
             interactiveLoadFinished = false
             isDisplayingHTMLFallback = false
+            isDocumentReady = false
 
-            if
-                renderingMode == .interactiveHTML,
-                let documentURL = lastDocumentURL,
-                let rootURL = lastRootURL
-            {
-                webView.loadFileURL(documentURL, allowingReadAccessTo: rootURL)
+            if renderingMode == .interactiveHTML, let lastDocumentHTML {
+                guard let baseURL = interactiveDocumentURL else {
+                    showInteractiveHTMLFallbackIfNeeded(in: webView)
+                    return
+                }
+                webView.loadHTMLString(lastDocumentHTML, baseURL: baseURL)
             } else if let lastDocumentHTML {
                 webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
             }
@@ -173,6 +248,24 @@ struct MarkdownWebView: NSViewRepresentable {
                     scroll(to: pendingAnchor, in: webView)
                 }
                 installInteractiveHTMLOutline(in: webView)
+                isDocumentReady = true
+                applyPendingFindRequest(to: webView)
+                return
+            }
+
+            if renderingMode == .sourceCode {
+                webView.evaluateJavaScript(Self.sourceHighlightingScript(
+                    selection: sourceSelection,
+                    pageIndex: sourceSelectionPageIndex
+                )) { [weak self, weak webView] _, _ in
+                    guard let self, let webView else { return }
+                    self.installSourceViewportTracking(in: webView) { [weak self, weak webView] in
+                        guard let self, let webView else { return }
+                        self.applyPendingSourceViewportUpdate(to: webView)
+                        self.isDocumentReady = true
+                        self.applyPendingFindRequest(to: webView)
+                    }
+                }
                 return
             }
 
@@ -187,6 +280,8 @@ struct MarkdownWebView: NSViewRepresentable {
             if let lastStyle {
                 apply(style: lastStyle, to: webView)
             }
+            isDocumentReady = true
+            applyPendingFindRequest(to: webView)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -200,11 +295,13 @@ struct MarkdownWebView: NSViewRepresentable {
             }
             webContentRecoveryCount += 1
             pendingAnchor = lastReportedAnchor
-            if renderingMode == .interactiveHTML, let documentURL = lastDocumentURL, let rootURL = lastRootURL {
+            if renderingMode == .interactiveHTML, let baseURL = interactiveDocumentURL {
                 interactiveLoadFinished = false
                 isDisplayingHTMLFallback = false
-                webView.loadFileURL(documentURL, allowingReadAccessTo: rootURL)
+                isDocumentReady = false
+                webView.loadHTMLString(lastDocumentHTML, baseURL: baseURL)
             } else {
+                isDocumentReady = false
                 webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
             }
         }
@@ -213,6 +310,25 @@ struct MarkdownWebView: NSViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == Self.sourceViewportMessageName {
+                guard
+                    let payload = message.body as? [String: Any],
+                    let type = payload["type"] as? String,
+                    let pageIndex = payload["pageIndex"] as? Int
+                else { return }
+                if type == "visible" {
+                    onSourceVisiblePage?(pageIndex)
+                    return
+                }
+                guard
+                    type == "boundary",
+                    let rawDirection = payload["direction"] as? String,
+                    let direction = SourceViewportDirection(rawValue: rawDirection)
+                else { return }
+                onSourceBoundary?(direction, pageIndex)
+                return
+            }
+
             guard message.name == Self.outlineMessageName, let rawAnchor = message.body as? String else {
                 return
             }
@@ -248,6 +364,35 @@ struct MarkdownWebView: NSViewRepresentable {
             }
 
             if renderingMode == .interactiveHTML, !isDisplayingHTMLFallback {
+                if scheme == LocalDocumentResourcePolicy.resourceScheme {
+                    guard
+                        let rootURL = lastRootURL,
+                        let candidate = LocalResourceSchemeHandler.fileURL(
+                            for: url,
+                            inside: rootURL
+                        )
+                    else {
+                        decisionHandler(.cancel)
+                        return
+                    }
+                    guard navigationAction.targetFrame?.isMainFrame != false else {
+                        decisionHandler(.allow)
+                        return
+                    }
+                    if
+                        candidate == lastDocumentURL?.resolvingSymlinksInPath().standardizedFileURL,
+                        url.fragment != nil
+                    {
+                        decisionHandler(.allow)
+                        return
+                    }
+                    decisionHandler(.cancel)
+                    if FileSystemService.previewKind(at: candidate) != nil {
+                        onOpenDocument?(candidate, url.fragment)
+                    }
+                    return
+                }
+
                 if scheme == "file" {
                     guard
                         let rootURL = lastRootURL,
@@ -257,14 +402,12 @@ struct MarkdownWebView: NSViewRepresentable {
                         return
                     }
 
+                    decisionHandler(.cancel)
                     if
                         navigationAction.targetFrame?.isMainFrame != false,
-                        FileNode.markdownExtensions.contains(url.pathExtension.lowercased())
+                        FileSystemService.previewKind(at: url) != nil
                     {
-                        decisionHandler(.cancel)
-                        onOpenMarkdown?(url, url.fragment)
-                    } else {
-                        decisionHandler(.allow)
+                        onOpenDocument?(url, url.fragment)
                     }
                     return
                 }
@@ -295,7 +438,7 @@ struct MarkdownWebView: NSViewRepresentable {
                 }
             }
 
-            if scheme == MarkdownRenderer.markdownScheme {
+            if scheme == LocalDocumentResourcePolicy.documentLinkScheme {
                 decisionHandler(.cancel)
                 guard
                     let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -305,10 +448,10 @@ struct MarkdownWebView: NSViewRepresentable {
 
                 let candidate = rootURL.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
                 guard
-                    FileNode.previewableExtensions.contains(candidate.pathExtension.lowercased()),
+                    FileSystemService.previewKind(at: candidate) != nil,
                     (try? FileSystemService.validate(candidate, inside: rootURL)) != nil
                 else { return }
-                onOpenMarkdown?(candidate, url.fragment)
+                onOpenDocument?(candidate, url.fragment)
                 return
             }
 
@@ -340,12 +483,182 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         func apply(style: ResolvedReaderTheme, to webView: WKWebView) {
-            guard let literal = Self.javaScriptLiteral(style.stylesheet) else { return }
+            let stylesheet: String
+            switch renderingMode {
+            case .sourceCode:
+                stylesheet = style.stylesheet + "\n" + SourceDocumentRenderer.stylesheet
+            case .image:
+                stylesheet = style.stylesheet + "\n" + ImageDocumentRenderer.stylesheet
+            case .styledDocument, .interactiveHTML:
+                stylesheet = style.stylesheet
+            }
+            guard let literal = Self.javaScriptLiteral(stylesheet) else { return }
+            let renderingScript = renderingMode == .sourceCode
+                ? ""
+                : Self.mermaidRenderingScript(isDark: style.isDark)
             let script = """
             document.getElementById('modu-theme').textContent = \(literal);
-            \(Self.mermaidRenderingScript(isDark: style.isDark))
+            \(renderingScript)
             """
             webView.evaluateJavaScript(script)
+        }
+
+        static func sourceHighlightingScript(selection: NSRange?, pageIndex: Int?) -> String {
+            let selectionScript: String
+            if let selection, let pageIndex {
+                selectionScript = """
+                const code = document.getElementById('source-code-\(pageIndex)');
+                if (!code) return highlighted;
+                const targetStart = \(selection.location);
+                const targetEnd = \(selection.location + selection.length);
+                const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+                let cursor = 0;
+                let startNode = null;
+                let startOffset = 0;
+                let endNode = null;
+                let endOffset = 0;
+                while (walker.nextNode()) {
+                  const node = walker.currentNode;
+                  const next = cursor + node.nodeValue.length;
+                  if (!startNode && targetStart >= cursor && targetStart <= next) {
+                    startNode = node;
+                    startOffset = targetStart - cursor;
+                  }
+                  if (targetEnd >= cursor && targetEnd <= next) {
+                    endNode = node;
+                    endOffset = targetEnd - cursor;
+                    break;
+                  }
+                  cursor = next;
+                }
+                if (startNode && endNode) {
+                  const range = document.createRange();
+                  range.setStart(startNode, startOffset);
+                  range.setEnd(endNode, endOffset);
+                  const selection = window.getSelection();
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                  startNode.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                }
+                """
+            } else {
+                selectionScript = "window.getSelection()?.removeAllRanges();"
+            }
+
+            return """
+            (() => {
+              const codes = Array.from(document.querySelectorAll('.source-code code'));
+              if (codes.length === 0) return false;
+              let highlighted = true;
+              for (const code of codes) {
+                try {
+                  const language = Array.from(code.classList)
+                    .find(value => value.startsWith('language-'))
+                    ?.slice('language-'.length);
+                  if (globalThis.hljs && (!language || globalThis.hljs.getLanguage(language))) {
+                    globalThis.hljs.highlightElement(code);
+                  } else {
+                    code.classList.add('hljs');
+                  }
+                } catch (_) {
+                  code.classList.add('hljs');
+                  highlighted = false;
+                }
+              }
+              \(selectionScript)
+              return highlighted && codes.every(code => code.classList.contains('hljs'));
+            })();
+            """
+        }
+
+        func apply(_ updates: [SourceViewportUpdate], to webView: WKWebView) {
+            let pendingIDs = Set(pendingSourceViewportUpdates.map(\.id))
+            pendingSourceViewportUpdates.append(contentsOf: updates.filter {
+                !completedSourceViewportUpdateIDs.contains($0.id) && !pendingIDs.contains($0.id)
+            })
+            applyPendingSourceViewportUpdate(to: webView)
+        }
+
+        private func applyPendingSourceViewportUpdate(to webView: WKWebView) {
+            guard
+                !webView.isLoading,
+                !isApplyingSourceViewportUpdate,
+                let update = pendingSourceViewportUpdates.first,
+                let script = Self.sourceViewportUpdateScript(update)
+            else { return }
+            isApplyingSourceViewportUpdate = true
+            webView.evaluateJavaScript(script) { [weak self] value, _ in
+                guard let self else { return }
+                self.isApplyingSourceViewportUpdate = false
+                guard value is Bool else { return }
+                if self.pendingSourceViewportUpdates.first?.id == update.id {
+                    self.pendingSourceViewportUpdates.removeFirst()
+                } else {
+                    self.pendingSourceViewportUpdates.removeAll { $0.id == update.id }
+                }
+                self.completedSourceViewportUpdateIDs.insert(update.id)
+                self.completedSourceViewportUpdateOrder.append(update.id)
+                while self.completedSourceViewportUpdateOrder.count > 16 {
+                    let removedID = self.completedSourceViewportUpdateOrder.removeFirst()
+                    self.completedSourceViewportUpdateIDs.remove(removedID)
+                }
+                self.applyPendingSourceViewportUpdate(to: webView)
+            }
+        }
+
+        func resetSourceViewportUpdates() {
+            pendingSourceViewportUpdates = []
+            completedSourceViewportUpdateIDs = []
+            completedSourceViewportUpdateOrder = []
+            isApplyingSourceViewportUpdate = false
+        }
+
+        static func sourceViewportUpdateScript(_ update: SourceViewportUpdate) -> String? {
+            var payload: [String: Any] = [
+                "action": update.action.rawValue,
+                "pageIndex": update.page.index,
+                "text": update.page.text,
+                "lineNumbers": SourceDocumentRenderer.lineNumbers(for: update.page),
+                "startLine": update.page.startLine,
+                "endLine": update.page.endLine,
+                "hasPrevious": update.page.hasPrevious,
+                "hasNext": update.page.hasNext,
+                "language": update.language.highlightIdentifier
+            ]
+            if let selectedRange = update.selectedRange {
+                payload["selectionStart"] = selectedRange.location
+                payload["selectionLength"] = selectedRange.length
+            }
+            if let targetLine = update.targetLine {
+                payload["targetLine"] = targetLine
+            }
+            guard
+                let data = try? JSONSerialization.data(withJSONObject: payload),
+                let encoded = String(data: data, encoding: .utf8)
+            else { return nil }
+            return "window.__moduSourceViewport?.apply(\(encoded));"
+        }
+
+        func find(_ request: DocumentSearchRequest, in webView: WKWebView) {
+            guard !request.query.isEmpty else {
+                webView.evaluateJavaScript("window.getSelection()?.removeAllRanges()") { [weak self] _, _ in
+                    self?.onFindResult?(request.id, true)
+                }
+                return
+            }
+            let configuration = WKFindConfiguration()
+            configuration.backwards = request.direction == .previous
+            configuration.caseSensitive = request.isCaseSensitive
+            configuration.wraps = true
+            webView.find(request.query, configuration: configuration) { [weak self] result in
+                self?.onFindResult?(request.id, result.matchFound)
+            }
+        }
+
+        private func applyPendingFindRequest(to webView: WKWebView) {
+            guard !webView.isLoading, let request = pendingFindRequest else { return }
+            pendingFindRequest = nil
+            find(request, in: webView)
         }
 
         func scroll(to anchor: String, in webView: WKWebView) {
@@ -363,15 +676,250 @@ struct MarkdownWebView: NSViewRepresentable {
             webView.evaluateJavaScript(Self.staticHTMLCompatibilityScript)
         }
 
+        private func installSourceViewportTracking(in webView: WKWebView, completion: (() -> Void)? = nil) {
+            webView.evaluateJavaScript(Self.sourceViewportTrackingScript) { _, _ in
+                completion?()
+            }
+        }
+
+        static let sourceViewportTrackingScript = """
+        (() => {
+          if (window.__moduSourceViewport) {
+            window.__moduSourceViewport.schedule();
+            return true;
+          }
+
+          const container = document.getElementById('source-segments');
+          if (!container) return false;
+          const maximumSegments = 3;
+          const pending = new Set();
+          let framePending = false;
+          let lastVisiblePage = null;
+
+          const post = payload => {
+            window.webkit?.messageHandlers?.moduSourceViewport?.postMessage(payload);
+          };
+
+          const highlight = code => {
+            try {
+              const language = Array.from(code.classList)
+                .find(value => value.startsWith('language-'))
+                ?.slice('language-'.length);
+              if (globalThis.hljs && (!language || globalThis.hljs.getLanguage(language))) {
+                globalThis.hljs.highlightElement(code);
+              } else {
+                code.classList.add('hljs');
+              }
+            } catch (_) {
+              code.classList.add('hljs');
+            }
+          };
+
+          const selectRange = (code, start, length) => {
+            if (!Number.isInteger(start) || !Number.isInteger(length)) return;
+            const targetEnd = start + length;
+            const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+            let cursor = 0;
+            let startNode = null;
+            let startOffset = 0;
+            let endNode = null;
+            let endOffset = 0;
+            while (walker.nextNode()) {
+              const node = walker.currentNode;
+              const next = cursor + node.nodeValue.length;
+              if (!startNode && start >= cursor && start <= next) {
+                startNode = node;
+                startOffset = start - cursor;
+              }
+              if (targetEnd >= cursor && targetEnd <= next) {
+                endNode = node;
+                endOffset = targetEnd - cursor;
+                break;
+              }
+              cursor = next;
+            }
+            if (!startNode || !endNode) return;
+            const range = document.createRange();
+            range.setStart(startNode, startOffset);
+            range.setEnd(endNode, endOffset);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            startNode.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+          };
+
+          const makeSegment = payload => {
+            const segment = document.createElement('section');
+            segment.className = 'source-segment';
+            segment.dataset.pageIndex = String(payload.pageIndex);
+            segment.dataset.startLine = String(payload.startLine);
+            segment.dataset.endLine = String(payload.endLine);
+            segment.dataset.hasPrevious = String(Boolean(payload.hasPrevious));
+            segment.dataset.hasNext = String(Boolean(payload.hasNext));
+
+            const numbers = document.createElement('pre');
+            numbers.className = 'source-line-numbers';
+            numbers.setAttribute('aria-hidden', 'true');
+            numbers.textContent = payload.lineNumbers;
+
+            const source = document.createElement('pre');
+            source.className = 'source-code';
+            const code = document.createElement('code');
+            code.id = `source-code-${payload.pageIndex}`;
+            code.className = `language-${payload.language}`;
+            code.textContent = payload.text;
+            source.appendChild(code);
+            segment.append(numbers, source);
+            highlight(code);
+            return { segment, code };
+          };
+
+          const scrollToLine = (segment, line) => {
+            if (!Number.isInteger(line)) return;
+            const startLine = Number(segment.dataset.startLine || 1);
+            const code = segment.querySelector('.source-code');
+            const lineHeight = parseFloat(getComputedStyle(code).lineHeight) || 21;
+            const topPadding = parseFloat(getComputedStyle(code).paddingTop) || 0;
+            const offset = Math.max(0, line - startLine);
+            const top = segment.offsetTop + topPadding + offset * lineHeight - window.innerHeight * 0.32;
+            window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+          };
+
+          const apply = payload => {
+            if (payload.action === 'clearPending') {
+              pending.clear();
+              schedule();
+              return true;
+            }
+            if (payload.action === 'releasePrevious') {
+              pending.delete('previous');
+              return true;
+            }
+            if (payload.action === 'releaseNext') {
+              pending.delete('next');
+              return true;
+            }
+            const existing = container.querySelector(
+              `.source-segment[data-page-index="${payload.pageIndex}"]`
+            );
+            pending.delete(payload.action === 'prepend' ? 'previous' : 'next');
+            if (existing && payload.action !== 'replace') {
+              schedule();
+              return false;
+            }
+
+            const { segment, code } = makeSegment(payload);
+            if (payload.action === 'replace') {
+              pending.clear();
+              container.replaceChildren(segment);
+              window.getSelection()?.removeAllRanges();
+              if (Number.isInteger(payload.targetLine)) {
+                scrollToLine(segment, payload.targetLine);
+              }
+            } else if (payload.action === 'prepend') {
+              container.prepend(segment);
+              const addedHeight = segment.getBoundingClientRect().height;
+              window.scrollBy(0, addedHeight);
+              while (container.children.length > maximumSegments) {
+                container.lastElementChild?.remove();
+              }
+            } else {
+              container.append(segment);
+              while (container.children.length > maximumSegments) {
+                const first = container.firstElementChild;
+                const removedHeight = first?.getBoundingClientRect().height || 0;
+                first?.remove();
+                window.scrollBy(0, -removedHeight);
+              }
+            }
+
+            if (Number.isInteger(payload.selectionStart)) {
+              selectRange(code, payload.selectionStart, payload.selectionLength || 0);
+            } else if (payload.action === 'replace' && Number.isInteger(payload.targetLine)) {
+              scrollToLine(segment, payload.targetLine);
+            }
+            schedule();
+            return true;
+          };
+
+          const requestBoundary = (direction, segment) => {
+            if (!segment || pending.has(direction)) return;
+            pending.add(direction);
+            post({
+              type: 'boundary',
+              direction,
+              pageIndex: Number(segment.dataset.pageIndex)
+            });
+          };
+
+          const update = () => {
+            framePending = false;
+            const segments = Array.from(container.querySelectorAll('.source-segment'));
+            if (segments.length === 0) return;
+
+            const marker = Math.min(window.innerHeight * 0.35, 320);
+            let visible = segments[0];
+            for (const segment of segments) {
+              const rect = segment.getBoundingClientRect();
+              if (rect.top <= marker) visible = segment;
+              if (rect.bottom > marker) break;
+            }
+            const visiblePage = Number(visible.dataset.pageIndex);
+            if (visiblePage !== lastVisiblePage) {
+              lastVisiblePage = visiblePage;
+              post({ type: 'visible', pageIndex: visiblePage });
+            }
+
+            const threshold = Math.max(720, window.innerHeight * 1.2);
+            const first = segments[0];
+            const last = segments[segments.length - 1];
+            if (window.scrollY < threshold && first.dataset.hasPrevious === 'true') {
+              requestBoundary('previous', first);
+            }
+            const remaining = document.documentElement.scrollHeight - (window.scrollY + window.innerHeight);
+            if (remaining < threshold && last.dataset.hasNext === 'true') {
+              requestBoundary('next', last);
+            }
+          };
+
+          const schedule = () => {
+            if (framePending) return;
+            framePending = true;
+            window.requestAnimationFrame(update);
+          };
+          const cleanup = () => {
+            window.removeEventListener('scroll', schedule);
+            window.removeEventListener('resize', schedule);
+            window.__moduSourceViewport = null;
+          };
+
+          window.addEventListener('scroll', schedule, { passive: true });
+          window.addEventListener('resize', schedule, { passive: true });
+          window.addEventListener('pagehide', cleanup, { once: true });
+          window.__moduSourceViewport = { apply, schedule, cleanup };
+          schedule();
+          return true;
+        })();
+        """
+
         private func showInteractiveHTMLFallbackIfNeeded(in webView: WKWebView) {
             guard
                 renderingMode == .interactiveHTML,
                 !interactiveLoadFinished,
                 !isDisplayingHTMLFallback,
-                let lastDocumentHTML
+                let lastInteractiveHTMLFallback
             else { return }
             isDisplayingHTMLFallback = true
-            webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
+            isDocumentReady = false
+            webView.loadHTMLString(lastInteractiveHTMLFallback, baseURL: nil)
+        }
+
+        private var interactiveDocumentURL: URL? {
+            guard let lastDocumentURL, let lastRootURL else { return nil }
+            return LocalResourceSchemeHandler.resourceURL(
+                for: lastDocumentURL,
+                inside: lastRootURL
+            )
         }
 
         private func installInteractiveHTMLOutline(in webView: WKWebView) {
@@ -802,142 +1350,5 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
         didReceive message: WKScriptMessage
     ) {
         delegate?.userContentController(userContentController, didReceive: message)
-    }
-}
-
-final class BundledAssetSchemeHandler: NSObject, WKURLSchemeHandler {
-    private static let maximumAssetSize = 5 * 1_024 * 1_024
-
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        guard
-            let requestURL = urlSchemeTask.request.url,
-            requestURL.scheme == MarkdownRenderer.bundledAssetScheme,
-            requestURL.host == "mermaid",
-            requestURL.path == "/mermaid-\(MarkdownRenderer.mermaidVersion).min.js"
-        else {
-            fail(urlSchemeTask, code: .badURL)
-            return
-        }
-
-        guard let assetURL = Self.mermaidAssetURL else {
-            fail(urlSchemeTask, code: .fileDoesNotExist)
-            return
-        }
-
-        do {
-            let values = try assetURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values.isRegularFile == true, (values.fileSize ?? 0) <= Self.maximumAssetSize else {
-                fail(urlSchemeTask, code: .dataLengthExceedsMaximum)
-                return
-            }
-
-            let data = try Data(contentsOf: assetURL, options: [.mappedIfSafe])
-            let response = URLResponse(
-                url: requestURL,
-                mimeType: "application/javascript",
-                expectedContentLength: data.count,
-                textEncodingName: "utf-8"
-            )
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-        } catch {
-            urlSchemeTask.didFailWithError(error)
-        }
-    }
-
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
-
-    static var mermaidAssetURL: URL? {
-        Bundle.main.url(
-            forResource: "mermaid.min",
-            withExtension: "js",
-            subdirectory: "Mermaid"
-        ) ?? AppResources.bundle.url(
-            forResource: "mermaid.min",
-            withExtension: "js",
-            subdirectory: "Mermaid"
-        )
-    }
-
-    private func fail(_ task: WKURLSchemeTask, code: URLError.Code) {
-        task.didFailWithError(URLError(code))
-    }
-}
-
-final class LocalResourceSchemeHandler: NSObject, WKURLSchemeHandler {
-    private static let mimeTypes: [String: String] = [
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "gif": "image/gif",
-        "webp": "image/webp",
-        "heic": "image/heic",
-        "heif": "image/heif",
-        "tif": "image/tiff",
-        "tiff": "image/tiff",
-        "bmp": "image/bmp"
-    ]
-
-    static func supports(_ fileExtension: String) -> Bool {
-        mimeTypes[fileExtension.lowercased()] != nil
-    }
-
-    var rootURL: URL?
-
-    init(rootURL: URL) {
-        self.rootURL = rootURL
-    }
-
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        guard
-            let requestURL = urlSchemeTask.request.url,
-            requestURL.scheme == MarkdownRenderer.resourceScheme,
-            let relativePath = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "path" })?.value,
-            let rootURL,
-            !relativePath.isEmpty
-        else {
-            fail(urlSchemeTask, code: .badURL)
-            return
-        }
-
-        let candidate = rootURL.appendingPathComponent(relativePath)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-        let fileExtension = candidate.pathExtension.lowercased()
-        guard
-            let mimeType = Self.mimeTypes[fileExtension],
-            (try? FileSystemService.validate(candidate, inside: rootURL)) != nil
-        else {
-            fail(urlSchemeTask, code: .noPermissionsToReadFile)
-            return
-        }
-
-        do {
-            let values = try candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values.isRegularFile == true, (values.fileSize ?? 0) <= 40 * 1_024 * 1_024 else {
-                fail(urlSchemeTask, code: .dataLengthExceedsMaximum)
-                return
-            }
-            let data = try Data(contentsOf: candidate, options: [.mappedIfSafe])
-            let response = URLResponse(
-                url: requestURL,
-                mimeType: mimeType,
-                expectedContentLength: data.count,
-                textEncodingName: nil
-            )
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-        } catch {
-            urlSchemeTask.didFailWithError(error)
-        }
-    }
-
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
-
-    private func fail(_ task: WKURLSchemeTask, code: URLError.Code) {
-        task.didFailWithError(URLError(code))
     }
 }

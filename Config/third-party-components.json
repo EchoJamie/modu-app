@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "components": [
+    {
+      "identity": "swift-markdown",
+      "noticeName": "swift-markdown",
+      "kind": "swiftpm",
+      "version": "0.7.3",
+      "revision": "7d9a5ce307528578dfa777d505496bd5f544ad94",
+      "source": "https://github.com/swiftlang/swift-markdown.git",
+      "license": "Apache-2.0",
+      "licensePath": ".build/checkouts/swift-markdown/LICENSE.txt",
+      "checkoutPath": ".build/checkouts/swift-markdown",
+      "packagedLicenseName": "swift-markdown-LICENSE.txt"
+    },
+    {
+      "identity": "swift-cmark",
+      "noticeName": "swift-cmark",
+      "kind": "swiftpm",
+      "version": "0.8.0",
+      "revision": "924936d0427cb25a61169739a7660230bffa6ea6",
+      "source": "https://github.com/swiftlang/swift-cmark.git",
+      "license": "BSD/MIT notices",
+      "licensePath": ".build/checkouts/swift-cmark/COPYING",
+      "checkoutPath": ".build/checkouts/swift-cmark",
+      "packagedLicenseName": "swift-cmark-COPYING.txt"
+    },
+    {
+      "identity": "mermaid",
+      "noticeName": "Mermaid",
+      "kind": "bundled",
+      "version": "11.16.1",
+      "source": "https://github.com/mermaid-js/mermaid",
+      "license": "MIT",
+      "licensePath": "Sources/MoDu/Resources/Mermaid/LICENSE.txt",
+      "provenancePath": "Sources/MoDu/Resources/Mermaid/ORIGIN.md",
+      "artifactRoot": "Sources/MoDu/Resources/Mermaid",
+      "packagedLicenseName": "Mermaid-LICENSE.txt"
+    },
+    {
+      "identity": "highlight.js",
+      "noticeName": "Highlight.js",
+      "kind": "bundled",
+      "version": "11.12.0",
+      "source": "https://github.com/highlightjs/cdn-release",
+      "license": "BSD-3-Clause",
+      "licensePath": "Sources/MoDu/Resources/Highlighter/LICENSE.txt",
+      "provenancePath": "Sources/MoDu/Resources/Highlighter/ORIGIN.md",
+      "artifactRoot": "Sources/MoDu/Resources/Highlighter",
+      "packagedLicenseName": "Highlight.js-LICENSE.txt"
+    }
+  ],
+  "artifacts": [
+    {"path": "THIRD_PARTY_NOTICES.md", "sha256": "fa892506d23598bbdc2c3724c85d711946aae4a21b1306eb1ce3794930a1d8aa"},
+    {"path": "Sources/MoDu/Resources/Mermaid/ORIGIN.md", "component": "mermaid", "sha256": "f2cb2deb09b96b1e1d7b7633972c54525e2e98af95648ce076a26eb51d588325"},
+    {"path": "Sources/MoDu/Resources/Mermaid/LICENSE.txt", "component": "mermaid", "sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80"},
+    {"path": "Sources/MoDu/Resources/Mermaid/mermaid.min.js", "component": "mermaid", "sha256": "18327bef70d96fb505fe7287d9f6a7362ebf07ff6576ddfaffb1a06f3e1a2954"},
+    {"path": "Sources/MoDu/Resources/Highlighter/ORIGIN.md", "component": "highlight.js", "sha256": "cc421b508bcad9cf194cace37364d62a5fa95e751f78847d863369b2284d7945"},
+    {"path": "Sources/MoDu/Resources/Highlighter/LICENSE.txt", "component": "highlight.js", "sha256": "5f289f36595e0ef6c53d9f4b4e51d7cc1efc5e2b3ba6130a875d177c54789eaf"},
+    {"path": "Sources/MoDu/Resources/Highlighter/highlight.min.js", "component": "highlight.js", "sha256": "8ab71eb09c51f501e5e25157d9cff100e46cc29bcbfc744d0b746d451fca7f53"},
+    {"path": "Sources/MoDu/Resources/Highlighter/dockerfile.min.js", "component": "highlight.js", "sha256": "d96f73b077d654d776795097cf49afae5dce3ce453106af022eae013ad2ec8b1"},
+    {"path": "Sources/MoDu/Resources/Highlighter/groovy.min.js", "component": "highlight.js", "sha256": "55b81d783372ed6c8c99d5c3568113845dceb93ea454c54f61582ef8d2970a17"},
+    {"path": "Sources/MoDu/Resources/Highlighter/gradle.min.js", "component": "highlight.js", "sha256": "03977cf861c7daafe75bbf9aa5bcb39f428fb5ea113ba282dde61f85fde6fe9e"},
+    {"path": "Sources/MoDu/Resources/Highlighter/properties.min.js", "component": "highlight.js", "sha256": "8a987022cc566fa5bfcd79058ec4ba010920d576fff809b92317295827402590"},
+    {"path": "Sources/MoDu/Resources/Highlighter/toml.min.js", "component": "highlight.js", "sha256": "cdfaf6fe726af73ea8c07b8eadaf681c8fb3b95ef4b9a7751f08c68e44ae7ea9"}
+  ]
+}

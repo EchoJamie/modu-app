@@ -11,12 +11,69 @@ struct RecentWorkspace: Identifiable, Equatable {
     var displayPath: String { url.path }
 }
 
-enum ReaderPaneID: String, Sendable {
+enum ReaderPaneID: String, Hashable, Sendable {
     case primary
     case reference
 
     var otherPane: ReaderPaneID {
         self == .primary ? .reference : .primary
+    }
+}
+
+struct PaneTaskRegistration {
+    let id: UUID
+    let task: Task<Void, Never>
+}
+
+enum ReaderPaneRetry {
+    case sourcePaging(SourceViewportDirection, edgePageIndex: Int)
+    case sourceLanguage(SourceLanguage)
+    case sourceViewportRestore
+}
+
+struct ReaderPaneState {
+    var selectedURL: URL?
+    var documentState: ReaderDocumentState = .welcome
+    var scrollRequest: ScrollRequest?
+    var selectedOutlineID: UUID?
+
+    var documentTask: Task<Void, Never>?
+    var documentGeneration = UUID()
+    var sourceSession: SourceFileSession?
+
+    var documentSearchState = DocumentSearchState()
+    var documentSearchFocusRequest: UUID?
+    var documentSearchRequest: DocumentSearchRequest?
+    var sourceViewportUpdates: [SourceViewportUpdate] = []
+    var sourceViewportTasks: [SourceViewportDirection: PaneTaskRegistration] = [:]
+    var sourceVisiblePageIndex: Int?
+    var sourceLineJumpState = SourceLineJumpState()
+    var sourceLineJumpFocusRequest: UUID?
+    var sourceLineJumpTask: PaneTaskRegistration?
+    var operationFailure: ReaderFailure?
+    var operationRetry: ReaderPaneRetry?
+
+    mutating func cancelAllTasks() {
+        documentTask?.cancel()
+        sourceViewportTasks.values.forEach { $0.task.cancel() }
+        sourceLineJumpTask?.task.cancel()
+        documentTask = nil
+        sourceViewportTasks = [:]
+        sourceLineJumpTask = nil
+    }
+
+    mutating func prepareForMove() {
+        cancelAllTasks()
+        documentGeneration = UUID()
+        sourceViewportUpdates = []
+        documentSearchState.isSearching = false
+        sourceLineJumpState.isResolving = false
+        if documentSearchState.isPresented {
+            documentSearchFocusRequest = UUID()
+        }
+        if sourceLineJumpState.isPresented {
+            sourceLineJumpFocusRequest = UUID()
+        }
     }
 }
 
@@ -46,15 +103,9 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var rootNodes: [FileNode] = []
     @Published private(set) var rootIsLoading = false
 
-    @Published private(set) var selectedURL: URL?
-    @Published private(set) var documentState: ReaderDocumentState = .welcome
-    @Published var scrollRequest: ScrollRequest?
-    @Published var selectedOutlineID: UUID?
-
-    @Published private(set) var referenceURL: URL?
-    @Published private(set) var referenceDocumentState: ReaderDocumentState?
-    @Published var referenceScrollRequest: ScrollRequest?
-    @Published var referenceSelectedOutlineID: UUID?
+    @Published private var paneStates: [ReaderPaneID: ReaderPaneState] = [
+        .primary: ReaderPaneState()
+    ]
     @Published var activePane: ReaderPaneID = .primary
 
     @Published var outlineIsVisible = true
@@ -63,22 +114,24 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var systemColorScheme: ColorScheme
     @Published private(set) var recentWorkspaces: [RecentWorkspace] = []
     @Published private(set) var fileOperationError: String?
-
     private var workspaceAccessSession: WorkspaceAccessSession?
     private var rootTask: Task<Void, Never>?
-    private var documentTask: Task<Void, Never>?
-    private var referenceDocumentTask: Task<Void, Never>?
     private var workspaceGeneration = UUID()
     private var treeGeneration = UUID()
-    private var documentGeneration = UUID()
-    private var referenceDocumentGeneration = UUID()
+    private var sourceLanguageOverrides: [String: SourceLanguage] = [:]
+    private let documentLoadCompletionBarrier: (@Sendable (URL, UUID) async -> Void)?
     private var debugArgumentsHandled = false
+    private var debugLineJumpRequested = false
 
     private static let recentWorkspaceBookmarksKey = "recentWorkspaceBookmarks.v1"
     private static let readerThemeKey = "readerTheme.v2"
     private static let maximumRecentWorkspaceCount = 8
 
-    init() {
+    init(
+        restorePersistedState: Bool = true,
+        documentLoadCompletionBarrier: (@Sendable (URL, UUID) async -> Void)? = nil
+    ) {
+        self.documentLoadCompletionBarrier = documentLoadCompletionBarrier
         let defaults = UserDefaults.standard
         let legacyTheme = defaults.string(forKey: "readerTheme")
         systemColorScheme = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -103,20 +156,24 @@ final class ReaderViewModel: ObservableObject {
             appAppearance = .system
         }
 
-        restoreRecentWorkspaces()
-        if let mostRecentWorkspace = recentWorkspaces.first {
-            openRecentWorkspace(mostRecentWorkspace, reportFailure: false)
+        if restorePersistedState {
+            restoreRecentWorkspaces()
+            if let mostRecentWorkspace = recentWorkspaces.first {
+                openRecentWorkspace(mostRecentWorkspace, reportFailure: false)
+            }
         }
     }
 
-    deinit {
-        rootTask?.cancel()
-        documentTask?.cancel()
-        referenceDocumentTask?.cancel()
-    }
-
     var rootName: String { rootURL?.lastPathComponent ?? L10n.string(.workspaceNotOpened) }
-    var hasSecondPane: Bool { referenceDocumentState != nil }
+    var selectedURL: URL? { paneStates[.primary]?.selectedURL }
+    var documentState: ReaderDocumentState { paneStates[.primary]?.documentState ?? .welcome }
+    var scrollRequest: ScrollRequest? { paneStates[.primary]?.scrollRequest }
+    var selectedOutlineID: UUID? { paneStates[.primary]?.selectedOutlineID }
+    var referenceURL: URL? { paneStates[.reference]?.selectedURL }
+    var referenceDocumentState: ReaderDocumentState? { paneStates[.reference]?.documentState }
+    var referenceScrollRequest: ScrollRequest? { paneStates[.reference]?.scrollRequest }
+    var referenceSelectedOutlineID: UUID? { paneStates[.reference]?.selectedOutlineID }
+    var hasSecondPane: Bool { paneStates[.reference] != nil }
     var currentTitle: String { currentTitle(for: activePane) }
     var resolvedTheme: ResolvedReaderTheme {
         ResolvedReaderTheme(
@@ -126,9 +183,25 @@ final class ReaderViewModel: ObservableObject {
     }
 
     var canReloadActiveDocument: Bool {
-        selectedURL(for: activePane).map {
-            FileNode.previewableExtensions.contains($0.pathExtension.lowercased())
-        } ?? false
+        switch documentState(for: activePane) {
+        case .loading, .loaded, .failed: true
+        case .welcome, .unsupported: false
+        }
+    }
+
+    var canFindInActiveDocument: Bool {
+        if case .loaded(_, let document) = documentState(for: activePane) {
+            return document.renderingMode != .image
+        }
+        return false
+    }
+
+    var canJumpToLineInActiveDocument: Bool {
+        guard
+            sourceSession(for: activePane) != nil,
+            case .loaded(_, let document) = documentState(for: activePane)
+        else { return false }
+        return document.sourcePage != nil
     }
 
     func currentTitle(for pane: ReaderPaneID) -> String {
@@ -140,22 +213,39 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func documentState(for pane: ReaderPaneID) -> ReaderDocumentState {
-        switch pane {
-        case .primary: documentState
-        case .reference: referenceDocumentState ?? .welcome
-        }
+        paneStates[pane]?.documentState ?? .welcome
     }
 
     func selectedURL(for pane: ReaderPaneID) -> URL? {
-        pane == .primary ? selectedURL : referenceURL
+        paneStates[pane]?.selectedURL
     }
 
+#if DEBUG
+    func installPaneStateForTesting(_ state: ReaderPaneState, in pane: ReaderPaneID) {
+        paneStates[pane] = state
+    }
+
+    func paneStateForTesting(_ pane: ReaderPaneID) -> ReaderPaneState? {
+        paneStates[pane]
+    }
+
+    func installWorkspaceForTesting(_ url: URL) {
+        rootTask?.cancel()
+        let accessSession = WorkspaceAccessSession(url: url)
+        workspaceAccessSession = accessSession
+        rootURL = accessSession.rootURL
+        rootNodes = []
+        rootIsLoading = false
+        workspaceGeneration = UUID()
+    }
+#endif
+
     func scrollRequest(for pane: ReaderPaneID) -> ScrollRequest? {
-        pane == .primary ? scrollRequest : referenceScrollRequest
+        paneStates[pane]?.scrollRequest
     }
 
     func selectedOutlineID(for pane: ReaderPaneID) -> UUID? {
-        pane == .primary ? selectedOutlineID : referenceSelectedOutlineID
+        paneStates[pane]?.selectedOutlineID
     }
 
     func outlineItems(for pane: ReaderPaneID) -> [OutlineItem] {
@@ -196,6 +286,7 @@ final class ReaderViewModel: ObservableObject {
         let anchor = arguments.firstIndex(of: "--open-anchor").flatMap { anchorIndex in
             arguments.indices.contains(anchorIndex + 1) ? arguments[anchorIndex + 1] : nil
         }
+        debugLineJumpRequested = arguments.contains("--show-line-jump")
         openWorkspace(fileURL.deletingLastPathComponent())
         loadDocument(at: fileURL, anchor: anchor, in: .primary)
 
@@ -221,8 +312,9 @@ final class ReaderViewModel: ObservableObject {
 
     private func openWorkspace(_ url: URL, bookmarkData: Data?) {
         rootTask?.cancel()
-        documentTask?.cancel()
-        referenceDocumentTask?.cancel()
+        for pane in Array(paneStates.keys) {
+            updatePane(pane) { $0.cancelAllTasks() }
+        }
 
         let accessSession = WorkspaceAccessSession(url: url)
         workspaceAccessSession = accessSession
@@ -230,18 +322,10 @@ final class ReaderViewModel: ObservableObject {
         rootURL = workspaceURL
         rootNodes = []
         rootIsLoading = true
-        selectedURL = nil
-        documentState = .welcome
-        scrollRequest = nil
-        selectedOutlineID = nil
-        referenceURL = nil
-        referenceDocumentState = nil
-        referenceScrollRequest = nil
-        referenceSelectedOutlineID = nil
+        paneStates = [.primary: ReaderPaneState()]
+        sourceLanguageOverrides = [:]
         activePane = .primary
         workspaceGeneration = UUID()
-        documentGeneration = UUID()
-        referenceDocumentGeneration = UUID()
         fileOperationError = nil
 
         rememberWorkspace(url, existingBookmarkData: bookmarkData)
@@ -403,10 +487,7 @@ final class ReaderViewModel: ObservableObject {
             return
         }
 
-        referenceDocumentTask?.cancel()
-        referenceDocumentGeneration = UUID()
-        clearSecondPaneState()
-        referenceDocumentState = .welcome
+        paneStates[.reference] = ReaderPaneState()
         activePane = .reference
     }
 
@@ -414,29 +495,23 @@ final class ReaderViewModel: ObservableObject {
         guard hasSecondPane else { return }
 
         if pane == .primary {
-            documentTask?.cancel()
-            referenceDocumentTask?.cancel()
-            documentGeneration = UUID()
-            referenceDocumentGeneration = UUID()
-
-            selectedURL = referenceURL
-            documentState = referenceDocumentState ?? .welcome
-            scrollRequest = referenceScrollRequest
-            selectedOutlineID = referenceSelectedOutlineID
-
-            let stateToResume = referenceDocumentState
-            clearSecondPaneState()
+            updatePane(.primary) { $0.cancelAllTasks() }
+            guard var survivor = paneStates.removeValue(forKey: .reference) else { return }
+            survivor.prepareForMove()
+            let stateToResume = survivor.documentState
+            paneStates[.primary] = survivor
             activePane = .primary
 
             if case .loading(let url) = stateToResume {
                 loadDocument(at: url, in: .primary)
+            } else {
+                restoreMovedSourceViewportIfNeeded(in: .primary)
             }
             return
         }
 
-        referenceDocumentTask?.cancel()
-        referenceDocumentGeneration = UUID()
-        clearSecondPaneState()
+        updatePane(.reference) { $0.cancelAllTasks() }
+        paneStates.removeValue(forKey: .reference)
         activePane = .primary
     }
 
@@ -482,6 +557,11 @@ final class ReaderViewModel: ObservableObject {
             }
 
             try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+            sourceLanguageOverrides = Self.migratingSourceLanguageOverrides(
+                sourceLanguageOverrides,
+                from: sourceURL,
+                to: targetURL
+            )
             rescanWorkspace(revealing: targetURL)
 
             if let updatedPrimary {
@@ -524,49 +604,119 @@ final class ReaderViewModel: ObservableObject {
         guard
             let rootURL,
             let accessSession = workspaceAccessSession,
-            FileNode.previewableExtensions.contains(url.pathExtension.lowercased())
+            let previewKind = FileSystemService.previewKind(at: url)
         else {
             return
         }
 
+        if paneStates[pane] == nil {
+            paneStates[pane] = ReaderPaneState()
+        }
+        resetSourcePresentation(in: pane)
         let documentToken = UUID()
-        switch pane {
-        case .primary:
-            documentTask?.cancel()
-            documentGeneration = documentToken
-            selectedURL = url
-            documentState = .loading(url)
-            selectedOutlineID = nil
-            scrollRequest = nil
-        case .reference:
-            referenceDocumentTask?.cancel()
-            referenceDocumentGeneration = documentToken
-            referenceURL = url
-            referenceDocumentState = .loading(url)
-            referenceSelectedOutlineID = nil
-            referenceScrollRequest = nil
+        updatePane(pane) { state in
+            state.documentTask?.cancel()
+            state.documentTask = nil
+            state.documentGeneration = documentToken
+            state.selectedURL = url
+            state.documentState = .loading(url)
+            state.selectedOutlineID = nil
+            state.scrollRequest = nil
+            state.sourceSession = nil
+            state.documentSearchState = DocumentSearchState()
+            state.documentSearchRequest = nil
+            state.operationFailure = nil
+            state.operationRetry = nil
         }
 
         let selectedStyle = resolvedTheme
+        let languageOverride = sourceLanguageOverrides[url.path]
         let workspaceToken = workspaceGeneration
+        let loadCompletionBarrier = documentLoadCompletionBarrier
         let task = Task { [weak self, accessSession] in
             defer { _ = accessSession }
             do {
-                let (source, size, modifiedAt) = try await FileSystemService.readText(at: url, inside: rootURL)
-                try Task.checkCancellation()
-                let rendered = try await CancellableWorker.run(priority: .userInitiated) {
-                    if FileNode.htmlExtensions.contains(url.pathExtension.lowercased()) {
-                        return try HTMLDocumentRenderer(
+                let result: (rendered: RenderedDocument, sourceSession: SourceFileSession?)
+                switch previewKind {
+                case .source(let inferredLanguage):
+                    result = try await CancellableWorker.run(priority: .userInitiated) {
+                        let session = try SourceFileSession(fileURL: url, rootURL: rootURL)
+                        let page = try session.page(at: 0)
+                        let resolvedInferredLanguage = inferredLanguage == .plaintext
+                            ? session.suggestedLanguage ?? inferredLanguage
+                            : inferredLanguage
+                        let selectedLanguage = languageOverride ?? resolvedInferredLanguage
+                        let rendered = try SourceDocumentRenderer(
+                            style: selectedStyle,
+                            documentURL: url
+                        ).render(
+                            page: page,
+                            language: selectedLanguage,
+                            inferredLanguage: resolvedInferredLanguage,
+                            fileSize: session.fileSize,
+                            modifiedAt: session.modifiedAt
+                        )
+                        return (rendered, session)
+                    }
+                case .image:
+                    let rendered = try await CancellableWorker.run(priority: .userInitiated) {
+                        try ImageDocumentRenderer(
                             style: selectedStyle,
                             documentURL: url,
                             rootURL: rootURL
-                        ).render(source, fileSize: size, modifiedAt: modifiedAt)
+                        ).render()
                     }
-                    return try MarkdownRenderer(
-                        style: selectedStyle,
-                        documentURL: url,
-                        rootURL: rootURL
-                    ).render(source, fileSize: size, modifiedAt: modifiedAt)
+                    result = (rendered, nil)
+                case .html, .markdown:
+                    do {
+                        let (source, size, modifiedAt) = try await FileSystemService.readText(
+                            at: url,
+                            inside: rootURL,
+                            maximumBytes: LocalDocumentResourcePolicy.maximumStructuredDocumentBytes
+                        )
+                        try Task.checkCancellation()
+                        let rendered = try await CancellableWorker.run(priority: .userInitiated) {
+                            switch previewKind {
+                            case .html:
+                                return try HTMLDocumentRenderer(
+                                    style: selectedStyle,
+                                    documentURL: url,
+                                    rootURL: rootURL
+                                ).render(source, fileSize: size, modifiedAt: modifiedAt)
+                            case .markdown:
+                                return try MarkdownRenderer(
+                                    style: selectedStyle,
+                                    documentURL: url,
+                                    rootURL: rootURL
+                                ).render(source, fileSize: size, modifiedAt: modifiedAt)
+                            case .source, .image:
+                                throw CancellationError()
+                            }
+                        }
+                        result = (rendered, nil)
+                    } catch FileSystemError.structuredDocumentTooLarge {
+                        result = try await CancellableWorker.run(priority: .userInitiated) {
+                            let session = try SourceFileSession(fileURL: url, rootURL: rootURL)
+                            let inferredLanguage: SourceLanguage = previewKind == .html ? .xml : .markdown
+                            let selectedLanguage = languageOverride ?? inferredLanguage
+                            let page = try session.page(at: 0)
+                            let rendered = try SourceDocumentRenderer(
+                                style: selectedStyle,
+                                documentURL: url
+                            ).render(
+                                page: page,
+                                language: selectedLanguage,
+                                inferredLanguage: inferredLanguage,
+                                fileSize: session.fileSize,
+                                modifiedAt: session.modifiedAt
+                            )
+                            return (rendered, session)
+                        }
+                    }
+                }
+
+                if let loadCompletionBarrier {
+                    await loadCompletionBarrier(url, documentToken)
                 }
 
                 guard
@@ -574,7 +724,15 @@ final class ReaderViewModel: ObservableObject {
                     self.workspaceGeneration == workspaceToken,
                     self.documentGeneration(for: pane) == documentToken
                 else { return }
-                self.setLoaded(rendered, at: url, anchor: anchor, in: pane)
+                self.setSourceSession(result.sourceSession, in: pane)
+                if result.sourceSession != nil {
+                    self.updatePane(pane) { $0.sourceVisiblePageIndex = 0 }
+                }
+                self.setLoaded(result.rendered, at: url, anchor: anchor, in: pane)
+                if pane == .primary, self.debugLineJumpRequested {
+                    self.debugLineJumpRequested = false
+                    self.requestSourceLineJumpFocus()
+                }
                 self.clearDocumentTask(in: pane)
             } catch is CancellationError {
                 return
@@ -583,15 +741,12 @@ final class ReaderViewModel: ObservableObject {
                     self.workspaceGeneration == workspaceToken,
                     self.documentGeneration(for: pane) == documentToken
                 else { return }
-                self.setFailed(error.localizedDescription, at: url, in: pane)
+                self.setFailed(error, operation: .documentLoad, at: url, in: pane)
                 self.clearDocumentTask(in: pane)
             }
         }
 
-        switch pane {
-        case .primary: documentTask = task
-        case .reference: referenceDocumentTask = task
-        }
+        setDocumentTask(task, in: pane)
     }
 
     func reloadActiveDocument() {
@@ -599,10 +754,518 @@ final class ReaderViewModel: ObservableObject {
         loadDocument(at: url, in: activePane)
     }
 
+    func documentSearchState(for pane: ReaderPaneID) -> DocumentSearchState {
+        paneStates[pane]?.documentSearchState ?? DocumentSearchState()
+    }
+
+    func documentSearchFocusRequest(for pane: ReaderPaneID) -> UUID? {
+        paneStates[pane]?.documentSearchFocusRequest
+    }
+
+    func documentSearchRequest(for pane: ReaderPaneID) -> DocumentSearchRequest? {
+        paneStates[pane]?.documentSearchRequest
+    }
+
+    func requestDocumentSearchFocus() {
+        guard canFindInActiveDocument else { return }
+        if sourceLineJumpState(for: activePane).isPresented {
+            dismissSourceLineJump(in: activePane)
+        }
+        var state = documentSearchState(for: activePane)
+        state.isPresented = true
+        updatePane(activePane) { paneState in
+            paneState.documentSearchState = state
+            paneState.documentSearchFocusRequest = UUID()
+        }
+    }
+
+    func dismissDocumentSearch(in pane: ReaderPaneID) {
+        cancelDocumentSearch(in: pane)
+        var state = documentSearchState(for: pane)
+        state.isPresented = false
+        state.isSearching = false
+        updatePane(pane) { paneState in
+            paneState.documentSearchState = state
+            paneState.documentSearchRequest = DocumentSearchRequest(
+                id: UUID(),
+                query: "",
+                isCaseSensitive: state.isCaseSensitive,
+                direction: .next
+            )
+        }
+    }
+
+    func updateDocumentSearchQuery(_ query: String, in pane: ReaderPaneID) {
+        var state = documentSearchState(for: pane)
+        guard state.query != query else { return }
+        cancelDocumentSearch(in: pane)
+        state.query = query
+        state.isSearching = false
+        state.match = nil
+        state.didWrap = false
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { $0.documentSearchState = state }
+    }
+
+    func toggleDocumentSearchCaseSensitivity(in pane: ReaderPaneID) {
+        var state = documentSearchState(for: pane)
+        cancelDocumentSearch(in: pane)
+        state.isCaseSensitive.toggle()
+        state.isSearching = false
+        state.match = nil
+        state.didWrap = false
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { $0.documentSearchState = state }
+    }
+
+    func sourceViewportUpdates(for pane: ReaderPaneID) -> [SourceViewportUpdate] {
+        paneStates[pane]?.sourceViewportUpdates ?? []
+    }
+
+    func operationFailure(for pane: ReaderPaneID) -> ReaderFailure? {
+        paneStates[pane]?.operationFailure
+    }
+
+    func dismissOperationFailure(in pane: ReaderPaneID) {
+        updatePane(pane) { state in
+            state.operationFailure = nil
+            state.operationRetry = nil
+        }
+    }
+
+    func retryOperation(in pane: ReaderPaneID) {
+        guard let retry = paneStates[pane]?.operationRetry else { return }
+        dismissOperationFailure(in: pane)
+        switch retry {
+        case .sourcePaging(let direction, let edgePageIndex):
+            loadAdjacentSourceSegment(direction, edgePageIndex: edgePageIndex, in: pane)
+        case .sourceLanguage(let language):
+            selectSourceLanguage(language, in: pane)
+        case .sourceViewportRestore:
+            restoreMovedSourceViewportIfNeeded(in: pane)
+        }
+    }
+
+    func updateVisibleSourcePage(_ pageIndex: Int, in pane: ReaderPaneID) {
+        guard sourceSession(for: pane) != nil else { return }
+        updatePane(pane) { $0.sourceVisiblePageIndex = pageIndex }
+    }
+
+    func loadAdjacentSourceSegment(
+        _ direction: SourceViewportDirection,
+        edgePageIndex: Int,
+        in pane: ReaderPaneID
+    ) {
+        guard
+            paneStates[pane]?.sourceViewportTasks[direction] == nil,
+            let session = sourceSession(for: pane),
+            case .loaded(_, let document) = documentState(for: pane),
+            let source = document.sourcePage,
+            let accessSession = workspaceAccessSession
+        else { return }
+
+        let targetIndex = edgePageIndex + (direction == .next ? 1 : -1)
+        guard targetIndex >= 0 else { return }
+        let documentToken = documentGeneration(for: pane)
+        let workspaceToken = workspaceGeneration
+        let taskID = UUID()
+        let task = Task { [weak self, accessSession] in
+            defer { _ = accessSession }
+            do {
+                let page = try await CancellableWorker.run(priority: .userInitiated) {
+                    try session.page(at: targetIndex)
+                }
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == documentToken
+                else { return }
+                self.enqueueSourceViewportUpdate(SourceViewportUpdate(
+                    action: direction == .next ? .append : .prepend,
+                    page: page,
+                    language: source.language,
+                    selectedRange: nil,
+                    targetLine: nil
+                ), in: pane)
+                self.updatePane(pane) { state in
+                    state.operationFailure = nil
+                    state.operationRetry = nil
+                }
+                self.clearSourceViewportTask(direction, id: taskID, in: pane)
+            } catch is CancellationError {
+                self?.clearSourceViewportTask(direction, id: taskID, in: pane)
+            } catch {
+                guard
+                    let self,
+                    self.documentGeneration(for: pane) == documentToken,
+                    let url = self.selectedURL(for: pane)
+                else { return }
+                self.clearSourceViewportTask(direction, id: taskID, in: pane)
+                self.enqueueSourceViewportUpdate(SourceViewportUpdate(
+                    action: direction == .previous ? .releasePrevious : .releaseNext,
+                    page: source.page,
+                    language: source.language,
+                    selectedRange: nil,
+                    targetLine: nil
+                ), in: pane)
+                self.setOperationFailure(
+                    error,
+                    operation: .sourcePaging,
+                    at: url,
+                    retry: .sourcePaging(direction, edgePageIndex: edgePageIndex),
+                    in: pane
+                )
+            }
+        }
+        updatePane(pane) {
+            $0.sourceViewportTasks[direction] = PaneTaskRegistration(id: taskID, task: task)
+        }
+    }
+
+    func sourceLineJumpState(for pane: ReaderPaneID) -> SourceLineJumpState {
+        paneStates[pane]?.sourceLineJumpState ?? SourceLineJumpState()
+    }
+
+    func sourceLineJumpFocusRequest(for pane: ReaderPaneID) -> UUID? {
+        paneStates[pane]?.sourceLineJumpFocusRequest
+    }
+
+    func requestSourceLineJumpFocus() {
+        let pane = activePane
+        guard sourceSession(for: pane) != nil else { return }
+        if documentSearchState(for: pane).isPresented {
+            dismissDocumentSearch(in: pane)
+        }
+        var state = sourceLineJumpState(for: pane)
+        state.isPresented = true
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { paneState in
+            paneState.sourceLineJumpState = state
+            paneState.sourceLineJumpFocusRequest = UUID()
+        }
+    }
+
+    func updateSourceLineJumpInput(_ value: String, in pane: ReaderPaneID) {
+        var state = sourceLineJumpState(for: pane)
+        state.input = value.filter { "0123456789".contains($0) }
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { $0.sourceLineJumpState = state }
+    }
+
+    func dismissSourceLineJump(in pane: ReaderPaneID) {
+        updatePane(pane) { state in
+            state.sourceLineJumpTask?.task.cancel()
+            state.sourceLineJumpTask = nil
+            state.sourceLineJumpState = SourceLineJumpState()
+            state.sourceLineJumpFocusRequest = nil
+        }
+    }
+
+    func jumpToSourceLine(in pane: ReaderPaneID) {
+        var state = sourceLineJumpState(for: pane)
+        guard
+            state.isPresented,
+            !state.isResolving,
+            let line = Int(state.input),
+            line > 0,
+            let session = sourceSession(for: pane),
+            case .loaded(_, let document) = documentState(for: pane),
+            let source = document.sourcePage,
+            let accessSession = workspaceAccessSession
+        else {
+            state.didFail = true
+            updatePane(pane) { $0.sourceLineJumpState = state }
+            return
+        }
+
+        updatePane(pane) { paneState in
+            paneState.sourceLineJumpTask?.task.cancel()
+            paneState.sourceLineJumpTask = nil
+        }
+        state.isResolving = true
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { $0.sourceLineJumpState = state }
+        let documentToken = documentGeneration(for: pane)
+        let workspaceToken = workspaceGeneration
+        let taskID = UUID()
+        let task = Task { [weak self, accessSession] in
+            defer { _ = accessSession }
+            do {
+                let page = try await CancellableWorker.run(priority: .userInitiated) {
+                    try session.page(containingLine: line)
+                }
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == documentToken
+                else { return }
+                self.clearSourceLineJumpTask(id: taskID, in: pane)
+                guard let page else {
+                    var failed = self.sourceLineJumpState(for: pane)
+                    failed.isResolving = false
+                    failed.didFail = true
+                    self.updatePane(pane) { paneState in
+                        paneState.sourceLineJumpState = failed
+                        paneState.sourceLineJumpFocusRequest = UUID()
+                    }
+                    return
+                }
+                self.cancelSourceViewportLoading(in: pane)
+                self.updatePane(pane) { $0.sourceVisiblePageIndex = page.index }
+                self.enqueueSourceViewportUpdate(SourceViewportUpdate(
+                    action: .replace,
+                    page: page,
+                    language: source.language,
+                    selectedRange: nil,
+                    targetLine: line
+                ), in: pane)
+                self.updatePane(pane) { paneState in
+                    paneState.sourceLineJumpState = SourceLineJumpState()
+                    paneState.sourceLineJumpFocusRequest = nil
+                }
+            } catch is CancellationError {
+                self?.clearSourceLineJumpTask(id: taskID, in: pane)
+            } catch {
+                guard let self else { return }
+                self.clearSourceLineJumpTask(id: taskID, in: pane)
+                var failed = self.sourceLineJumpState(for: pane)
+                failed.isResolving = false
+                failed.didFail = true
+                failed.failure = ReaderFailure(error: error, operation: .lineJump)
+                self.updatePane(pane) { paneState in
+                    paneState.sourceLineJumpState = failed
+                    paneState.sourceLineJumpFocusRequest = UUID()
+                }
+            }
+        }
+        updatePane(pane) {
+            $0.sourceLineJumpTask = PaneTaskRegistration(id: taskID, task: task)
+        }
+    }
+
+    func selectSourceLanguage(_ language: SourceLanguage, in pane: ReaderPaneID) {
+        guard
+            let url = selectedURL(for: pane),
+            case .loaded(_, let document) = documentState(for: pane),
+            let source = document.sourcePage,
+            let session = sourceSession(for: pane),
+            let accessSession = workspaceAccessSession
+        else { return }
+        guard source.language != language else { return }
+
+        cancelDocumentSearch(in: pane)
+        sourceLanguageOverrides[url.path] = language
+        cancelSourceViewportLoading(in: pane)
+        documentTask(in: pane)?.cancel()
+        let token = UUID()
+        setDocumentGeneration(token, in: pane)
+        let style = resolvedTheme
+        let workspaceToken = workspaceGeneration
+        let pageIndex = paneStates[pane]?.sourceVisiblePageIndex ?? source.page.index
+        let selectedRange = documentSearchState(for: pane).match.flatMap { match in
+            match.pageIndex == pageIndex ? match.range : nil
+        }
+
+        let task = Task { [weak self, accessSession] in
+            defer { _ = accessSession }
+            do {
+                let rendered = try await CancellableWorker.run(priority: .userInitiated) {
+                    let page = try session.page(at: pageIndex)
+                    return try SourceDocumentRenderer(style: style, documentURL: url).render(
+                        page: page,
+                        language: language,
+                        inferredLanguage: source.inferredLanguage,
+                        fileSize: session.fileSize,
+                        modifiedAt: session.modifiedAt,
+                        selectedRange: selectedRange
+                    )
+                }
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == token
+                else { return }
+                self.updatePane(pane) { paneState in
+                    paneState.sourceViewportUpdates = []
+                    paneState.sourceVisiblePageIndex = pageIndex
+                    paneState.operationFailure = nil
+                    paneState.operationRetry = nil
+                }
+                self.setLoaded(rendered, at: url, anchor: nil, in: pane)
+                self.clearDocumentTask(in: pane)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard
+                    let self,
+                    self.documentGeneration(for: pane) == token,
+                    let currentURL = self.selectedURL(for: pane)
+                else { return }
+                self.setOperationFailure(
+                    error,
+                    operation: .sourcePaging,
+                    at: currentURL,
+                    retry: .sourceLanguage(language),
+                    in: pane
+                )
+                self.clearDocumentTask(in: pane)
+            }
+        }
+        setDocumentTask(task, in: pane)
+    }
+
+    func findInDocument(_ direction: DocumentSearchDirection, in pane: ReaderPaneID) {
+        let state = documentSearchState(for: pane)
+        guard state.isPresented, !state.query.isEmpty else { return }
+
+        if sourceSession(for: pane) != nil {
+            findInSource(direction, in: pane)
+            return
+        }
+
+        guard case .loaded = documentState(for: pane) else { return }
+        let request = DocumentSearchRequest(
+            id: UUID(),
+            query: state.query,
+            isCaseSensitive: state.isCaseSensitive,
+            direction: direction
+        )
+        var searchingState = state
+        searchingState.isSearching = true
+        searchingState.match = nil
+        searchingState.didWrap = false
+        searchingState.didFail = false
+        searchingState.failure = nil
+        updatePane(pane) { paneState in
+            paneState.documentSearchState = searchingState
+            paneState.documentSearchRequest = request
+        }
+    }
+
+    func updateDocumentSearchResult(
+        requestID: UUID,
+        found: Bool,
+        in pane: ReaderPaneID
+    ) {
+        guard paneStates[pane]?.documentSearchRequest?.id == requestID else { return }
+        var state = documentSearchState(for: pane)
+        state.isSearching = false
+        state.match = nil
+        state.didWrap = false
+        state.didFail = !found
+        state.failure = nil
+        updatePane(pane) { $0.documentSearchState = state }
+    }
+
+    private func findInSource(_ direction: DocumentSearchDirection, in pane: ReaderPaneID) {
+        guard
+            let session = sourceSession(for: pane),
+            case .loaded(_, let currentDocument) = documentState(for: pane),
+            let currentSource = currentDocument.sourcePage,
+            let accessSession = workspaceAccessSession
+        else { return }
+
+        var state = documentSearchState(for: pane)
+        guard !state.query.isEmpty else { return }
+        state.isSearching = true
+        state.didFail = false
+        state.failure = nil
+        updatePane(pane) { $0.documentSearchState = state }
+
+        cancelSourceViewportLoading(in: pane)
+        documentTask(in: pane)?.cancel()
+        let token = UUID()
+        setDocumentGeneration(token, in: pane)
+        let workspaceToken = workspaceGeneration
+        let query = state.query
+        let caseSensitive = state.isCaseSensitive
+        let currentMatch = state.match
+        let currentPageIndex = paneStates[pane]?.sourceVisiblePageIndex ?? currentSource.page.index
+
+        let task = Task { [weak self, accessSession] in
+            defer { _ = accessSession }
+            do {
+                let result = try await CancellableWorker.run(priority: .userInitiated) {
+                    let search = try session.find(
+                        query,
+                        caseSensitive: caseSensitive,
+                        direction: direction,
+                        currentPageIndex: currentPageIndex,
+                        currentMatch: currentMatch
+                    )
+                    guard let match = search.match else {
+                        return (page: Optional<SourcePage>.none, match: Optional<SourceSearchMatch>.none, search.didWrap)
+                    }
+                    let page = try session.page(at: match.pageIndex)
+                    return (Optional(page), Optional(match), search.didWrap)
+                }
+
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == token
+                else { return }
+                if let page = result.page, let match = result.match {
+                    self.updatePane(pane) { $0.sourceVisiblePageIndex = page.index }
+                    self.enqueueSourceViewportUpdate(SourceViewportUpdate(
+                        action: .replace,
+                        page: page,
+                        language: currentSource.language,
+                        selectedRange: match.range,
+                        targetLine: match.line
+                    ), in: pane)
+                } else {
+                    self.clearSourceViewportPending(in: pane, source: currentSource)
+                }
+                var latest = self.documentSearchState(for: pane)
+                latest.isSearching = false
+                latest.match = result.match
+                latest.didWrap = result.2
+                latest.didFail = result.match == nil
+                latest.failure = nil
+                self.updatePane(pane) { $0.documentSearchState = latest }
+                self.clearDocumentTask(in: pane)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard
+                    let self,
+                    self.documentGeneration(for: pane) == token
+                else { return }
+                var failed = self.documentSearchState(for: pane)
+                failed.isSearching = false
+                failed.didFail = true
+                failed.failure = ReaderFailure(error: error, operation: .documentSearch)
+                self.updatePane(pane) { $0.documentSearchState = failed }
+                self.clearDocumentTask(in: pane)
+            }
+        }
+        setDocumentTask(task, in: pane)
+    }
+
     func selectAppAppearance(_ newAppearance: AppAppearance) {
         guard appAppearance != newAppearance else { return }
         appAppearance = newAppearance
         UserDefaults.standard.set(newAppearance.rawValue, forKey: "appAppearance")
+        guard newAppearance == .system else { return }
+
+        // preferredColorScheme 解除后，NSApp 的有效外观会在后续主循环才恢复为系统值。
+        // 延后刷新，避免 WebView 使用切换前的强制明暗配色。
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let newColorScheme: ColorScheme = NSApp.effectiveAppearance
+                    .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                    ? .dark
+                    : .light
+                self.updateSystemColorScheme(newColorScheme)
+            }
+        }
     }
 
     func selectMarkdownStyle(_ newStyle: MarkdownStyle) {
@@ -628,13 +1291,9 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func scroll(to item: OutlineItem, in pane: ReaderPaneID) {
-        switch pane {
-        case .primary:
-            selectedOutlineID = item.id
-            scrollRequest = ScrollRequest(anchor: item.anchor)
-        case .reference:
-            referenceSelectedOutlineID = item.id
-            referenceScrollRequest = ScrollRequest(anchor: item.anchor)
+        updatePane(pane) { state in
+            state.selectedOutlineID = item.id
+            state.scrollRequest = ScrollRequest(anchor: item.anchor)
         }
     }
 
@@ -656,90 +1315,284 @@ final class ReaderViewModel: ObservableObject {
         }
     }
 
-    func openMarkdownLink(_ url: URL, anchor: String? = nil, in pane: ReaderPaneID) {
+    func openDocumentLink(_ url: URL, anchor: String? = nil, in pane: ReaderPaneID) {
         guard
             let rootURL,
-            FileNode.previewableExtensions.contains(url.pathExtension.lowercased()),
+            FileSystemService.previewKind(at: url) != nil,
             (try? FileSystemService.validate(url, inside: rootURL)) != nil
         else { return }
         loadDocument(at: url, anchor: anchor, in: pane)
     }
 
     private func loadDocumentOrUnsupported(at url: URL, in pane: ReaderPaneID) {
-        if FileNode.previewableExtensions.contains(url.pathExtension.lowercased()) {
+        if FileSystemService.previewKind(at: url) != nil {
             loadDocument(at: url, in: pane)
         } else {
-            switch pane {
-            case .primary:
-                documentTask?.cancel()
-                documentGeneration = UUID()
-                selectedURL = url
-                documentState = .unsupported(url)
-                scrollRequest = nil
-                selectedOutlineID = nil
-            case .reference:
-                referenceDocumentTask?.cancel()
-                referenceDocumentGeneration = UUID()
-                referenceURL = url
-                referenceDocumentState = .unsupported(url)
-                referenceScrollRequest = nil
-                referenceSelectedOutlineID = nil
+            if paneStates[pane] == nil {
+                paneStates[pane] = ReaderPaneState()
+            }
+            resetSourcePresentation(in: pane)
+            updatePane(pane) { state in
+                state.documentTask?.cancel()
+                state.documentTask = nil
+                state.documentGeneration = UUID()
+                state.sourceSession = nil
+                state.selectedURL = url
+                state.documentState = .unsupported(url)
+                state.scrollRequest = nil
+                state.selectedOutlineID = nil
+                state.documentSearchState = DocumentSearchState()
+                state.documentSearchFocusRequest = nil
+                state.documentSearchRequest = nil
+                state.operationFailure = nil
+                state.operationRetry = nil
             }
         }
     }
 
-    private func clearSecondPaneState() {
-        referenceURL = nil
-        referenceDocumentState = nil
-        referenceScrollRequest = nil
-        referenceSelectedOutlineID = nil
-    }
-
-    private func clearDocumentTask(in pane: ReaderPaneID) {
-        switch pane {
-        case .primary: documentTask = nil
-        case .reference: referenceDocumentTask = nil
+    private func cancelDocumentSearch(in pane: ReaderPaneID) {
+        guard documentSearchState(for: pane).isSearching else { return }
+        documentTask(in: pane)?.cancel()
+        setDocumentTask(nil, in: pane)
+        setDocumentGeneration(UUID(), in: pane)
+        var state = documentSearchState(for: pane)
+        state.isSearching = false
+        updatePane(pane) { paneState in
+            paneState.documentSearchState = state
+            paneState.documentSearchRequest = nil
+        }
+        if
+            case .loaded(_, let document) = documentState(for: pane),
+            let source = document.sourcePage
+        {
+            clearSourceViewportPending(in: pane, source: source)
         }
     }
 
+    private func updatePane(
+        _ pane: ReaderPaneID,
+        _ update: (inout ReaderPaneState) -> Void
+    ) {
+        guard var state = paneStates[pane] else { return }
+        update(&state)
+        paneStates[pane] = state
+    }
+
+    private func clearDocumentTask(in pane: ReaderPaneID) {
+        updatePane(pane) { $0.documentTask = nil }
+    }
+
     private func documentGeneration(for pane: ReaderPaneID) -> UUID {
-        pane == .primary ? documentGeneration : referenceDocumentGeneration
+        paneStates[pane]?.documentGeneration ?? UUID()
+    }
+
+    private func setDocumentGeneration(_ generation: UUID, in pane: ReaderPaneID) {
+        updatePane(pane) { $0.documentGeneration = generation }
+    }
+
+    private func documentTask(in pane: ReaderPaneID) -> Task<Void, Never>? {
+        paneStates[pane]?.documentTask
+    }
+
+    private func setDocumentTask(_ task: Task<Void, Never>?, in pane: ReaderPaneID) {
+        updatePane(pane) { $0.documentTask = task }
+    }
+
+    private func sourceSession(for pane: ReaderPaneID) -> SourceFileSession? {
+        paneStates[pane]?.sourceSession
+    }
+
+    private func setSourceSession(_ session: SourceFileSession?, in pane: ReaderPaneID) {
+        updatePane(pane) { $0.sourceSession = session }
+    }
+
+    static func migratingSourceLanguageOverrides(
+        _ overrides: [String: SourceLanguage],
+        from sourceURL: URL,
+        to targetURL: URL
+    ) -> [String: SourceLanguage] {
+        let sourcePath = sourceURL.standardizedFileURL.path
+        let targetPath = targetURL.standardizedFileURL.path
+        let sourcePrefix = sourcePath + "/"
+        var migrated = overrides
+
+        for (path, language) in overrides where path == sourcePath || path.hasPrefix(sourcePrefix) {
+            migrated.removeValue(forKey: path)
+            let suffix = String(path.dropFirst(sourcePath.count))
+            migrated[targetPath + suffix] = language
+        }
+        return migrated
+    }
+
+    private func cancelSourceViewportLoading(in pane: ReaderPaneID) {
+        let registrations = paneStates[pane].map { Array($0.sourceViewportTasks.values) } ?? []
+        guard !registrations.isEmpty else { return }
+        registrations.forEach { $0.task.cancel() }
+        updatePane(pane) { $0.sourceViewportTasks = [:] }
+        if
+            case .loaded(_, let document) = documentState(for: pane),
+            let source = document.sourcePage
+        {
+            clearSourceViewportPending(in: pane, source: source)
+        }
+    }
+
+    private func clearSourceViewportTask(
+        _ direction: SourceViewportDirection,
+        id: UUID,
+        in pane: ReaderPaneID
+    ) {
+        updatePane(pane) { state in
+            guard state.sourceViewportTasks[direction]?.id == id else { return }
+            state.sourceViewportTasks.removeValue(forKey: direction)
+        }
+    }
+
+    private func clearSourceLineJumpTask(id: UUID, in pane: ReaderPaneID) {
+        updatePane(pane) { state in
+            guard state.sourceLineJumpTask?.id == id else { return }
+            state.sourceLineJumpTask = nil
+        }
+    }
+
+    private func clearSourceViewportPending(in pane: ReaderPaneID, source: RenderedSourcePage) {
+        enqueueSourceViewportUpdate(SourceViewportUpdate(
+            action: .clearPending,
+            page: source.page,
+            language: source.language,
+            selectedRange: nil,
+            targetLine: nil
+        ), in: pane)
+    }
+
+    private func enqueueSourceViewportUpdate(_ update: SourceViewportUpdate, in pane: ReaderPaneID) {
+        updatePane(pane) { state in
+            state.sourceViewportUpdates.append(update)
+            if state.sourceViewportUpdates.count > 4 {
+                state.sourceViewportUpdates.removeFirst(state.sourceViewportUpdates.count - 4)
+            }
+        }
+    }
+
+    private func resetSourcePresentation(in pane: ReaderPaneID) {
+        cancelSourceViewportLoading(in: pane)
+        updatePane(pane) { state in
+            state.sourceLineJumpTask?.task.cancel()
+            state.sourceLineJumpTask = nil
+            state.sourceViewportUpdates = []
+            state.sourceVisiblePageIndex = nil
+            state.sourceLineJumpState = SourceLineJumpState()
+            state.sourceLineJumpFocusRequest = nil
+        }
     }
 
     private func setLoaded(
-        _ rendered: RenderedMarkdown,
+        _ rendered: RenderedDocument,
         at url: URL,
         anchor: String?,
         in pane: ReaderPaneID
     ) {
-        switch pane {
-        case .primary:
-            documentState = .loaded(url, rendered)
+        updatePane(pane) { state in
+            state.documentState = .loaded(url, rendered)
+            state.operationFailure = nil
+            state.operationRetry = nil
             if let anchor {
-                selectedOutlineID = rendered.outline.first(where: { $0.anchor == anchor })?.id
-                scrollRequest = ScrollRequest(anchor: anchor)
-            }
-        case .reference:
-            referenceDocumentState = .loaded(url, rendered)
-            if let anchor {
-                referenceSelectedOutlineID = rendered.outline.first(where: { $0.anchor == anchor })?.id
-                referenceScrollRequest = ScrollRequest(anchor: anchor)
+                state.selectedOutlineID = rendered.outline.first(where: { $0.anchor == anchor })?.id
+                state.scrollRequest = ScrollRequest(anchor: anchor)
             }
         }
     }
 
-    private func setFailed(_ message: String, at url: URL, in pane: ReaderPaneID) {
-        switch pane {
-        case .primary: documentState = .failed(url, message)
-        case .reference: referenceDocumentState = .failed(url, message)
+    private func setFailed(
+        _ error: Error,
+        operation: ReaderFailureOperation,
+        at url: URL,
+        in pane: ReaderPaneID
+    ) {
+        let failure = ReaderFailure(error: error, operation: operation)
+        updatePane(pane) { state in
+            state.documentState = .failed(url, failure)
+            state.operationFailure = nil
+            state.operationRetry = nil
+        }
+    }
+
+    private func setOperationFailure(
+        _ error: Error,
+        operation: ReaderFailureOperation,
+        at _: URL,
+        retry: ReaderPaneRetry? = nil,
+        in pane: ReaderPaneID
+    ) {
+        updatePane(pane) { state in
+            state.operationFailure = ReaderFailure(error: error, operation: operation)
+            state.operationRetry = retry
         }
     }
 
     private func setSelectedOutlineID(_ id: UUID?, in pane: ReaderPaneID) {
-        switch pane {
-        case .primary: selectedOutlineID = id
-        case .reference: referenceSelectedOutlineID = id
+        updatePane(pane) { $0.selectedOutlineID = id }
+    }
+
+    private func restoreMovedSourceViewportIfNeeded(in pane: ReaderPaneID) {
+        guard
+            let state = paneStates[pane],
+            let pageIndex = state.sourceVisiblePageIndex,
+            let session = state.sourceSession,
+            let accessSession = workspaceAccessSession,
+            case .loaded(let url, let document) = state.documentState,
+            let source = document.sourcePage,
+            pageIndex != source.page.index
+        else { return }
+
+        let token = UUID()
+        let workspaceToken = workspaceGeneration
+        let selectedRange = state.documentSearchState.match.flatMap { match in
+            match.pageIndex == pageIndex ? match.range : nil
         }
+        updatePane(pane) { $0.documentGeneration = token }
+        let style = resolvedTheme
+        let task = Task { [weak self, accessSession] in
+            defer { _ = accessSession }
+            do {
+                let rendered = try await CancellableWorker.run(priority: .userInitiated) {
+                    let page = try session.page(at: pageIndex)
+                    return try SourceDocumentRenderer(style: style, documentURL: url).render(
+                        page: page,
+                        language: source.language,
+                        inferredLanguage: source.inferredLanguage,
+                        fileSize: session.fileSize,
+                        modifiedAt: session.modifiedAt,
+                        selectedRange: selectedRange
+                    )
+                }
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == token
+                else { return }
+                self.setLoaded(rendered, at: url, anchor: nil, in: pane)
+                self.updatePane(pane) { $0.sourceVisiblePageIndex = pageIndex }
+                self.clearDocumentTask(in: pane)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard
+                    let self,
+                    self.workspaceGeneration == workspaceToken,
+                    self.documentGeneration(for: pane) == token
+                else { return }
+                self.setOperationFailure(
+                    error,
+                    operation: .sourcePaging,
+                    at: url,
+                    retry: .sourceViewportRestore,
+                    in: pane
+                )
+                self.clearDocumentTask(in: pane)
+            }
+        }
+        setDocumentTask(task, in: pane)
     }
 
     private func replacingPathPrefix(in candidate: URL, from source: URL, to target: URL) -> URL? {

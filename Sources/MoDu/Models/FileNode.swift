@@ -127,27 +127,37 @@ final class FileNode: ObservableObject, Identifiable {
     var isDirectory: Bool { kind == .directory }
 
     var isMarkdown: Bool {
-        Self.markdownExtensions.contains(url.pathExtension.lowercased())
+        previewKind == .markdown
     }
 
     var isHTML: Bool {
-        Self.htmlExtensions.contains(url.pathExtension.lowercased())
+        previewKind == .html
+    }
+
+    var isImage: Bool {
+        previewKind == .image
     }
 
     var isPreviewable: Bool {
-        Self.previewableExtensions.contains(url.pathExtension.lowercased())
+        previewKind != nil
+    }
+
+    var previewKind: PreviewDocumentKind? {
+        PreviewDocumentKind.resolve(fileName: name, isRegularFile: kind == .file)
     }
 
     var iconName: String {
         if isDirectory { return isExpanded ? "folder.fill.badge.minus" : "folder.fill" }
         if isMarkdown { return "doc.richtext" }
         if isHTML { return "globe" }
+        if isImage { return "photo" }
+        if case .source = previewKind {
+            return "chevron.left.forwardslash.chevron.right"
+        }
 
         switch url.pathExtension.lowercased() {
-        case "png", "jpg", "jpeg", "gif", "webp", "heic", "svg":
+        case "png", "jpg", "jpeg", "gif", "webp", "heic":
             return "photo"
-        case "swift", "js", "ts", "tsx", "jsx", "py", "go", "rs", "java", "css", "html", "json", "yaml", "yml":
-            return "chevron.left.forwardslash.chevron.right"
         case "pdf":
             return "doc.text.image"
         default:
@@ -155,7 +165,6 @@ final class FileNode: ObservableObject, Identifiable {
         }
     }
 
-    nonisolated static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkd"]
-    nonisolated static let htmlExtensions: Set<String> = ["html", "htm"]
-    nonisolated static let previewableExtensions = markdownExtensions.union(htmlExtensions)
+    nonisolated static let markdownExtensions = PreviewDocumentKind.markdownExtensions
+    nonisolated static let htmlExtensions = PreviewDocumentKind.htmlExtensions
 }

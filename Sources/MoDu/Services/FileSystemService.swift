@@ -3,16 +3,26 @@ import Foundation
 enum FileSystemError: LocalizedError {
     case outsideWorkspace
     case unsupportedEncoding
+    case structuredDocumentTooLarge
 
     var errorDescription: String? {
         switch self {
         case .outsideWorkspace: L10n.string(.errorOutsideWorkspace)
         case .unsupportedEncoding: L10n.string(.errorUnsupportedEncoding)
+        case .structuredDocumentTooLarge: L10n.string(.errorStructuredDocumentTooLarge)
         }
     }
 }
 
 enum FileSystemService {
+    static func previewKind(at url: URL) -> PreviewDocumentKind? {
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+        return PreviewDocumentKind.resolve(
+            fileName: url.lastPathComponent,
+            isRegularFile: values?.isRegularFile == true
+        )
+    }
+
     static func entries(at directoryURL: URL, inside rootURL: URL) async throws -> [FileEntry] {
         try await CancellableWorker.run(priority: .userInitiated) {
             try entriesSynchronously(at: directoryURL, inside: rootURL)
@@ -84,13 +94,42 @@ enum FileSystemService {
         return .directory
     }
 
-    static func readText(at fileURL: URL, inside rootURL: URL) async throws -> (String, Int64, Date?) {
+    static func readText(
+        at fileURL: URL,
+        inside rootURL: URL,
+        maximumBytes: Int? = nil
+    ) async throws -> (String, Int64, Date?) {
         try await CancellableWorker.run(priority: .userInitiated) {
-            try validate(fileURL, inside: rootURL)
+            let readableURL = try validatedURL(fileURL, inside: rootURL)
             try Task.checkCancellation()
 
-            let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+            let values = try readableURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            if let maximumBytes, let fileSize = values.fileSize, fileSize > maximumBytes {
+                throw FileSystemError.structuredDocumentTooLarge
+            }
+
+            let handle = try FileHandle(forReadingFrom: readableURL)
+            defer { try? handle.close() }
+            let data: Data
+            if let maximumBytes {
+                var boundedData = Data()
+                while boundedData.count <= maximumBytes {
+                    try Task.checkCancellation()
+                    let remainingBytes = maximumBytes + 1 - boundedData.count
+                    guard
+                        remainingBytes > 0,
+                        let chunk = try handle.read(upToCount: remainingBytes),
+                        !chunk.isEmpty
+                    else { break }
+                    boundedData.append(chunk)
+                }
+                guard boundedData.count <= maximumBytes else {
+                    throw FileSystemError.structuredDocumentTooLarge
+                }
+                data = boundedData
+            } else {
+                data = try handle.readToEnd() ?? Data()
+            }
             try Task.checkCancellation()
 
             let encodings: [String.Encoding] = [.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian]
@@ -98,15 +137,52 @@ enum FileSystemService {
                 throw FileSystemError.unsupportedEncoding
             }
 
-            return (content, Int64(values.fileSize ?? data.count), values.contentModificationDate)
+            return (content, Int64(data.count), values.contentModificationDate)
         }
     }
 
     static func validate(_ candidateURL: URL, inside rootURL: URL) throws {
-        let root = rootURL.resolvingSymlinksInPath().standardizedFileURL.path
-        let candidate = candidateURL.resolvingSymlinksInPath().standardizedFileURL.path
-        guard candidate == root || candidate.hasPrefix(root + "/") else {
+        _ = try validatedURL(candidateURL, inside: rootURL)
+    }
+
+    static func readData(
+        at fileURL: URL,
+        inside rootURL: URL,
+        maximumBytes: Int
+    ) throws -> Data {
+        let readableURL = try validatedURL(fileURL, inside: rootURL)
+        let values = try readableURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        guard (values.fileSize ?? 0) <= maximumBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+
+        let handle = try FileHandle(forReadingFrom: readableURL)
+        defer { try? handle.close() }
+        var data = Data()
+        while data.count <= maximumBytes {
+            let remainingBytes = maximumBytes + 1 - data.count
+            guard
+                remainingBytes > 0,
+                let chunk = try handle.read(upToCount: remainingBytes),
+                !chunk.isEmpty
+            else { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        return data
+    }
+
+    static func validatedURL(_ candidateURL: URL, inside rootURL: URL) throws -> URL {
+        let root = rootURL.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = candidateURL.resolvingSymlinksInPath().standardizedFileURL
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
             throw FileSystemError.outsideWorkspace
         }
+        return candidate
     }
 }

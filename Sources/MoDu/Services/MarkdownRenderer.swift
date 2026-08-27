@@ -2,24 +2,12 @@ import Foundation
 import Markdown
 
 final class MarkdownRenderer {
-    static let resourceScheme = "modu-resource"
-    static let markdownScheme = "modu-markdown"
-    static let bundledAssetScheme = "modu-asset"
-    static let mermaidVersion = "11.16.1"
-
-    static var mermaidScriptURL: String {
-        "\(bundledAssetScheme)://mermaid/mermaid-\(mermaidVersion).min.js"
-    }
-
     static func shouldUseWideTable(columnCount: Int, contentLength: Int) -> Bool {
         columnCount >= 5 ||
             (columnCount >= 4 && contentLength >= 160) ||
             (columnCount >= 3 && contentLength >= 360)
     }
 
-    private static let localImageExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"
-    ]
     private static let maximumMermaidSourceSize = 50_000
     private static let maximumMermaidDiagramCount = 64
     private static let maximumMermaidTotalSourceSize = 500_000
@@ -109,7 +97,7 @@ final class MarkdownRenderer {
         self.rootURL = rootURL
     }
 
-    func render(_ source: String, fileSize: Int64, modifiedAt: Date?) throws -> RenderedMarkdown {
+    func render(_ source: String, fileSize: Int64, modifiedAt: Date?) throws -> RenderedDocument {
         try Task.checkCancellation()
         let extracted = MarkdownFrontMatter.extract(from: source)
         if let metadata = extracted.metadata {
@@ -122,10 +110,12 @@ final class MarkdownRenderer {
             try renderBlock(child)
         }
 
-        let scriptSource = hasRenderableMermaidDiagram ? "\(Self.bundledAssetScheme):" : "'none'"
+        let scriptSource = hasRenderableMermaidDiagram
+            ? "\(LocalDocumentResourcePolicy.bundledAssetScheme):"
+            : "'none'"
         let contentSecurityPolicy = DocumentSecurityPolicy.value(scriptSource: scriptSource)
         let mermaidScript = hasRenderableMermaidDiagram
-            ? "<script src=\"\(Self.mermaidScriptURL)\"></script>"
+            ? "<script src=\"\(LocalDocumentResourcePolicy.mermaidScriptURL)\"></script>"
             : ""
 
         let html = """
@@ -148,8 +138,8 @@ final class MarkdownRenderer {
         </html>
         """
 
-        return RenderedMarkdown(
-            html: html,
+        return RenderedDocument(
+            content: .styledHTML(html),
             outline: outline,
             fileSize: fileSize,
             modifiedAt: modifiedAt
@@ -455,11 +445,11 @@ final class MarkdownRenderer {
 
         let parts = decoded.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
         guard let candidate = resolvedLocalURL(String(parts[0])) else { return nil }
-        guard FileNode.previewableExtensions.contains(candidate.pathExtension.lowercased()) else { return nil }
+        guard FileSystemService.previewKind(at: candidate) != nil else { return nil }
         guard let relativePath = relativePath(for: candidate) else { return nil }
 
         var components = URLComponents()
-        components.scheme = Self.markdownScheme
+        components.scheme = LocalDocumentResourcePolicy.documentLinkScheme
         components.host = "local"
         components.queryItems = [URLQueryItem(name: "path", value: relativePath)]
         if parts.count == 2, !parts[1].isEmpty {
@@ -482,11 +472,14 @@ final class MarkdownRenderer {
         guard URL(string: decoded)?.scheme == nil, let candidate = resolvedLocalURL(decoded) else {
             return nil
         }
-        guard Self.localImageExtensions.contains(candidate.pathExtension.lowercased()) else { return nil }
+        guard LocalDocumentResourcePolicy.supportsImageExtension(
+            candidate.pathExtension,
+            for: .markdownEmbedded
+        ) else { return nil }
         guard let relativePath = relativePath(for: candidate) else { return nil }
 
         var components = URLComponents()
-        components.scheme = Self.resourceScheme
+        components.scheme = LocalDocumentResourcePolicy.resourceScheme
         components.host = "local"
         components.queryItems = [URLQueryItem(name: "path", value: relativePath)]
         return components.string

@@ -12,6 +12,8 @@
 "command.displayMode" = "Appearance";
 "command.openSecondPane" = "Open Second Reading Pane";
 "command.closeActivePane" = "Close Active Reading Pane";
+"command.findInDocument" = "Find in Document";
+"command.goToLine" = "Go to Line";
 
 "outline.hide" = "Hide Outline";
 "outline.show" = "Show Outline";
@@ -37,6 +39,7 @@
 
 "error.outsideWorkspace" = "This file is outside the current workspace.";
 "error.unsupportedEncoding" = "The text encoding of this file could not be recognized.";
+"error.structuredDocumentTooLarge" = "This document is too large for full rendering and will be shown as paged source.";
 "error.emptyName" = "The name cannot be empty.";
 "error.nameSeparator" = "The name cannot contain “/”.";
 "error.renameOutside" = "The renamed item must remain inside the current workspace.";
@@ -69,9 +72,10 @@
 "document.closePane" = "Close This Pane";
 "document.loading" = "Loading %@…";
 "document.unsupportedTitle" = "Preview Not Supported";
-"document.unsupportedMessage" = "%@ is not a supported Markdown or HTML file.";
+"document.unsupportedMessage" = "%@ is not a supported Markdown, HTML, image, code, configuration, or text file.";
 "document.failedTitle" = "Load Failed";
-"welcome.title" = "Choose a Markdown or HTML document";
+"document.find.close" = "Close Find Bar (Esc)";
+"welcome.title" = "Choose a document, source file, or image";
 "welcome.subtitle" = "Manage files locally and load remote images only when needed";
 "welcome.localRendering" = "Local Rendering";
 "welcome.rename" = "Rename in Folder";
@@ -108,5 +112,21 @@
 
 "image.notLoaded" = "Image not loaded";
 "image.withAlt" = "Image: %@";
+"image.previewTooLarge" = "This image exceeds the %d MB local preview limit.";
+"image.previewInvalid" = "This file is not a supported local image.";
 "webView.recoveryTitle" = "The document display process could not recover";
 "webView.recoveryMessage" = "To prevent repeated memory usage, MoDu stopped automatic reloads. Use the reload button in the top-right corner to try again.";
+
+"source.language.plainText" = "Plain Text";
+"source.language.help" = "Syntax highlighting language";
+"source.lineJump.placeholder" = "Line number";
+"document.find.caseSensitive" = "Match case";
+"document.find.placeholder" = "Find in document";
+"document.find.line" = "Line %d";
+"document.find.notFound" = "No matches";
+"document.find.previous" = "Previous match";
+"document.find.next" = "Next match";
+"document.retryOperation" = "Retry";
+"source.notRegularFile" = "This item is not a regular file.";
+"source.fileChanged" = "The source file changed while it was being read. Reload it and try again.";
+"source.pageUnavailable" = "This source segment is no longer available.";

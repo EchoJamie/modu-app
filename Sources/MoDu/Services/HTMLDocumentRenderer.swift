@@ -12,7 +12,7 @@ final class HTMLDocumentRenderer {
         self.rootURL = rootURL
     }
 
-    func render(_ source: String, fileSize: Int64, modifiedAt: Date?) throws -> RenderedMarkdown {
+    func render(_ source: String, fileSize: Int64, modifiedAt: Date?) throws -> RenderedDocument {
         try Task.checkCancellation()
 
         let sourceBody = try firstCapture(
@@ -61,12 +61,11 @@ final class HTMLDocumentRenderer {
         </html>
         """
 
-        return RenderedMarkdown(
-            html: html,
+        return RenderedDocument(
+            content: .interactiveHTML(sourceHTML: source, fallbackHTML: html),
             outline: headingResult.outline,
             fileSize: fileSize,
-            modifiedAt: modifiedAt,
-            renderingMode: .interactiveHTML
+            modifiedAt: modifiedAt
         )
     }
 
@@ -204,12 +203,12 @@ final class HTMLDocumentRenderer {
             return ["http", "https", "mailto"].contains(scheme) ? url.absoluteString : nil
         }
         guard let candidate = resolvedLocalURL(decoded) else { return nil }
-        guard FileNode.previewableExtensions.contains(candidate.pathExtension.lowercased()) else { return nil }
+        guard FileSystemService.previewKind(at: candidate) != nil else { return nil }
         guard let relativePath = relativePath(for: candidate) else { return nil }
 
         let parts = decoded.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
         var components = URLComponents()
-        components.scheme = MarkdownRenderer.markdownScheme
+        components.scheme = LocalDocumentResourcePolicy.documentLinkScheme
         components.host = "local"
         components.queryItems = [URLQueryItem(name: "path", value: relativePath)]
         if parts.count == 2, !parts[1].isEmpty {
@@ -232,11 +231,14 @@ final class HTMLDocumentRenderer {
         }
 
         guard let candidate = resolvedLocalURL(decoded) else { return nil }
-        guard LocalResourceSchemeHandler.supports(candidate.pathExtension) else { return nil }
+        guard LocalDocumentResourcePolicy.supportsImageExtension(
+            candidate.pathExtension,
+            for: .interactiveHTML
+        ) else { return nil }
         guard let relativePath = relativePath(for: candidate) else { return nil }
 
         var components = URLComponents()
-        components.scheme = MarkdownRenderer.resourceScheme
+        components.scheme = LocalDocumentResourcePolicy.resourceScheme
         components.host = "local"
         components.queryItems = [URLQueryItem(name: "path", value: relativePath)]
         return components.string

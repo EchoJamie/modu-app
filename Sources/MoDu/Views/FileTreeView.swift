@@ -5,6 +5,7 @@ struct FileTreeView: View {
     @EnvironmentObject private var model: ReaderViewModel
     @State private var focusedNodeID: String?
     @State private var focusRequestID = UUID()
+    @State private var scrollRequestID = UUID()
     @State private var editingNodeID: String?
     @State private var renameDraft = ""
 
@@ -29,11 +30,9 @@ struct FileTreeView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
-            .onChange(of: focusedNodeID) { nodeID in
-                guard let nodeID else { return }
-                withAnimation(.easeOut(duration: 0.12)) {
-                    proxy.scrollTo(nodeID, anchor: .center)
-                }
+            .onChange(of: scrollRequestID) { _ in
+                guard let focusedNodeID else { return }
+                proxy.scrollTo(focusedNodeID)
             }
         }
         .background {
@@ -43,6 +42,7 @@ struct FileTreeView: View {
                 isRenaming: editingNodeID != nil,
                 onRename: beginRenamingFocusedNode,
                 onCopy: copyFocusedNodePath,
+                onOpen: openFocusedNode,
                 onOpenInOtherPane: openFocusedNodeInOtherPane,
                 onMoveUp: { moveFocus(by: -1) },
                 onMoveDown: { moveFocus(by: 1) },
@@ -58,6 +58,11 @@ struct FileTreeView: View {
     private func focusNode(_ node: FileNode) {
         focusedNodeID = node.id
         focusRequestID = UUID()
+    }
+
+    private func focusAndRevealNode(_ node: FileNode) {
+        focusNode(node)
+        scrollRequestID = UUID()
     }
 
     private func beginRenamingFocusedNode() {
@@ -86,6 +91,16 @@ struct FileTreeView: View {
         return true
     }
 
+    private func openFocusedNode() -> Bool {
+        guard
+            let focusedNodeID,
+            let node = findNode(withID: focusedNodeID, in: model.rootNodes),
+            !node.isDirectory
+        else { return false }
+        model.select(node)
+        return true
+    }
+
     private func moveFocus(by offset: Int) -> Bool {
         guard
             let focusedNodeID,
@@ -94,7 +109,7 @@ struct FileTreeView: View {
 
         let targetIndex = min(max(currentIndex + offset, 0), visibleNodes.count - 1)
         if targetIndex != currentIndex {
-            focusNode(visibleNodes[targetIndex])
+            focusAndRevealNode(visibleNodes[targetIndex])
         }
         return true
     }
@@ -108,7 +123,7 @@ struct FileTreeView: View {
         if node.isDirectory, node.isExpanded {
             model.setExpanded(node, expanded: false)
         } else if let parent = findParent(of: focusedNodeID, in: model.rootNodes) {
-            focusNode(parent)
+            focusAndRevealNode(parent)
         }
         return true
     }
@@ -123,7 +138,7 @@ struct FileTreeView: View {
         if !node.isExpanded {
             model.setExpanded(node, expanded: true)
         } else if let firstChild = node.children?.first {
-            focusNode(firstChild)
+            focusAndRevealNode(firstChild)
         }
         return true
     }
@@ -361,6 +376,7 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
     let isRenaming: Bool
     let onRename: () -> Void
     let onCopy: () -> Void
+    let onOpen: () -> Bool
     let onOpenInOtherPane: () -> Bool
     let onMoveUp: () -> Bool
     let onMoveDown: () -> Bool
@@ -384,6 +400,7 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
         context.coordinator.isRenaming = isRenaming
         context.coordinator.onRename = onRename
         context.coordinator.onCopy = onCopy
+        context.coordinator.onOpen = onOpen
         context.coordinator.onOpenInOtherPane = onOpenInOtherPane
         context.coordinator.onMoveUp = onMoveUp
         context.coordinator.onMoveDown = onMoveDown
@@ -411,6 +428,7 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
         var isRenaming = false
         var onRename: () -> Void = {}
         var onCopy: () -> Void = {}
+        var onOpen: () -> Bool = { false }
         var onOpenInOtherPane: () -> Bool = { false }
         var onMoveUp: () -> Bool = { false }
         var onMoveDown: () -> Bool = { false }
@@ -457,6 +475,13 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
                     onRename()
                     return nil
                 }
+            }
+
+            if event.keyCode == 49,
+               !event.isARepeat,
+               relevantModifiers.isEmpty,
+               onOpen() {
+                return nil
             }
 
             if event.charactersIgnoringModifiers?.lowercased() == "c",
