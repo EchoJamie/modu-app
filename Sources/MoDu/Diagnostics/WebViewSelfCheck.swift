@@ -20,6 +20,10 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
     private var timeoutGeneration = UUID()
     private var darkRerenderRequested = false
     private var phase: Phase = .mermaid
+    private var htmlDocumentURL: URL?
+    private var isAwaitingInitialHTMLNavigation = false
+    private var didValidateInitialHTMLNavigation = false
+    private var didValidateSrcdocNavigation = false
 
     func run() {
         let root = FileManager.default.temporaryDirectory
@@ -548,6 +552,9 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
         let scriptSource = """
         (() => {
           const slides = Array.from(document.querySelectorAll('.slide'));
+          window.addEventListener('message', event => {
+            if (event.data === 'modu-srcdoc-ready') window.moduSrcdocReady = true;
+          });
           const show = index => slides.forEach((slide, itemIndex) => {
             slide.classList.toggle('active', itemIndex === index);
           });
@@ -577,6 +584,11 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
           </div>
           <button id="next" type="button">下一页</button>
           <script src="../shared/prototype.js"></script>
+          <iframe
+            sandbox="allow-scripts"
+            title="srcdoc navigation check"
+            srcdoc="&lt;p&gt;srcdoc rendered&lt;/p&gt;&lt;script&gt;parent.postMessage('modu-srcdoc-ready', '*')&lt;/script&gt;"
+          ></iframe>
         </body>
         </html>
         """
@@ -606,6 +618,10 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
                 return
             }
             phase = .html
+            htmlDocumentURL = htmlURL
+            isAwaitingInitialHTMLNavigation = true
+            didValidateInitialHTMLNavigation = false
+            didValidateSrcdocNavigation = false
             resetPhaseTimeout(after: 8, message: "WKWebView HTML 原型验证超时")
             webView.loadHTMLString(htmlSource, baseURL: baseURL)
         } catch {
@@ -631,6 +647,7 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             scriptExecuted: window.moduPrototypeScriptExecuted === true,
             cardBorder: card ? getComputedStyle(card).borderTopWidth : '',
             htmlLanguage: document.documentElement.lang,
+            srcdocReady: window.moduSrcdocReady === true,
             initialSlideVisible,
             nextSlideVisible: slides.length === 2 &&
               !slides[0].classList.contains('active') &&
@@ -651,6 +668,7 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             let scriptExecuted = result?["scriptExecuted"] as? Bool ?? false
             let cardBorder = result?["cardBorder"] as? String
             let htmlLanguage = result?["htmlLanguage"] as? String
+            let srcdocReady = result?["srcdocReady"] as? Bool ?? false
             let initialSlideVisible = result?["initialSlideVisible"] as? Bool ?? false
             let nextSlideVisible = result?["nextSlideVisible"] as? Bool ?? false
             let fileProtocol = result?["fileProtocol"] as? String
@@ -660,8 +678,11 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
                 scriptExecuted,
                 cardBorder == "3px",
                 htmlLanguage == "zh-CN",
+                srcdocReady,
                 initialSlideVisible,
                 nextSlideVisible,
+                didValidateInitialHTMLNavigation,
+                didValidateSrcdocNavigation,
                 fileProtocol == "\(LocalDocumentResourcePolicy.resourceScheme):"
             {
                 let configuration = WKFindConfiguration()
@@ -673,7 +694,7 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
                     }
                     self?.finish(
                         success: true,
-                        message: "WKWebView 已验证离线 Mermaid、源码连续滚动与高亮、图片预览、通用文档查找、metadata 折叠交互与完整本地 HTML 原型"
+                        message: "WKWebView 已验证离线 Mermaid、源码连续滚动与高亮、图片预览、通用文档查找、metadata 折叠交互、HTML 初次导航与 srcdoc 子框架策略及完整本地 HTML 原型"
                     )
                 }
                 return
@@ -681,13 +702,58 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             guard Date() < self.deadline else {
                 self.finish(
                     success: false,
-                    message: "WKWebView HTML 验证超时：标题=\(heading ?? "空")，图片=\(imageReady)，脚本=\(scriptExecuted)，样式=\(cardBorder ?? "空")，初始页=\(initialSlideVisible)，交互翻页=\(nextSlideVisible)，协议=\(fileProtocol ?? "空")"
+                    message: "WKWebView HTML 验证超时：标题=\(heading ?? "空")，图片=\(imageReady)，脚本=\(scriptExecuted)，样式=\(cardBorder ?? "空")，srcdoc=\(srcdocReady)，初始页=\(initialSlideVisible)，交互翻页=\(nextSlideVisible)，协议=\(fileProtocol ?? "空")"
                 )
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
                 self?.pollHTMLResult()
             }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        if
+            let requestURL = navigationAction.request.url,
+            MarkdownWebView.Coordinator.isAllowedInternalNavigation(
+                url: requestURL,
+                isMainFrame: navigationAction.targetFrame?.isMainFrame
+            )
+        {
+            if requestURL.absoluteString.hasPrefix("about:srcdoc") {
+                didValidateSrcdocNavigation = true
+            }
+            decisionHandler(.allow)
+            return
+        }
+
+        guard
+            phase == .html,
+            let requestURL = navigationAction.request.url,
+            requestURL.scheme == LocalDocumentResourcePolicy.resourceScheme,
+            let root = temporaryRoot,
+            let candidate = LocalResourceSchemeHandler.fileURL(for: requestURL, inside: root)
+        else {
+            decisionHandler(.allow)
+            return
+        }
+
+        if MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+            isAwaitingInitialNavigation: isAwaitingInitialHTMLNavigation,
+            isMainFrame: navigationAction.targetFrame?.isMainFrame,
+            isOtherNavigation: navigationAction.navigationType == .other,
+            candidateURL: candidate,
+            currentDocumentURL: htmlDocumentURL
+        ) {
+            isAwaitingInitialHTMLNavigation = false
+            didValidateInitialHTMLNavigation = true
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
         }
     }
 

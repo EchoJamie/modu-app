@@ -140,6 +140,85 @@ struct DocumentGovernanceTests {
         }
     }
 
+    @Test("Initial interactive HTML navigation stays in the current web view")
+    func initialInteractiveHTMLNavigation() throws {
+        try withTemporaryRoot { root in
+            let currentDocument = root.appendingPathComponent("current.html")
+            let otherDocument = root.appendingPathComponent("other.html")
+
+            #expect(
+                MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+                    isAwaitingInitialNavigation: true,
+                    isMainFrame: true,
+                    isOtherNavigation: true,
+                    candidateURL: currentDocument,
+                    currentDocumentURL: currentDocument
+                )
+            )
+            #expect(
+                !MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+                    isAwaitingInitialNavigation: false,
+                    isMainFrame: true,
+                    isOtherNavigation: true,
+                    candidateURL: currentDocument,
+                    currentDocumentURL: currentDocument
+                )
+            )
+            #expect(
+                !MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+                    isAwaitingInitialNavigation: true,
+                    isMainFrame: false,
+                    isOtherNavigation: true,
+                    candidateURL: currentDocument,
+                    currentDocumentURL: currentDocument
+                )
+            )
+            #expect(
+                !MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+                    isAwaitingInitialNavigation: true,
+                    isMainFrame: true,
+                    isOtherNavigation: false,
+                    candidateURL: currentDocument,
+                    currentDocumentURL: currentDocument
+                )
+            )
+            #expect(
+                !MarkdownWebView.Coordinator.isExpectedInitialInteractiveNavigation(
+                    isAwaitingInitialNavigation: true,
+                    isMainFrame: true,
+                    isOtherNavigation: true,
+                    candidateURL: otherDocument,
+                    currentDocumentURL: currentDocument
+                )
+            )
+        }
+    }
+
+    @Test("Sandboxed srcdoc stays available only as a subframe")
+    func sandboxedSrcdocNavigation() throws {
+        let srcdocURL = try #require(URL(string: "about:srcdoc"))
+        let srcdocAnchorURL = try #require(URL(string: "about:srcdoc#section"))
+
+        #expect(
+            MarkdownWebView.Coordinator.isAllowedInternalNavigation(
+                url: srcdocURL,
+                isMainFrame: false
+            )
+        )
+        #expect(
+            MarkdownWebView.Coordinator.isAllowedInternalNavigation(
+                url: srcdocAnchorURL,
+                isMainFrame: false
+            )
+        )
+        #expect(
+            !MarkdownWebView.Coordinator.isAllowedInternalNavigation(
+                url: srcdocURL,
+                isMainFrame: true
+            )
+        )
+    }
+
     @Test("CR paging and cross-boundary search remain stable")
     func sourcePagingAndSearch() throws {
         try withTemporaryRoot { root in

@@ -200,11 +200,48 @@ struct MarkdownWebView: NSViewRepresentable {
         var webContentRecoveryCount = 0
         var interactiveLoadFinished = false
         var isDisplayingHTMLFallback = false
+        var isAwaitingInitialInteractiveNavigation = false
         var isDocumentReady = false
         private static let maximumWebContentRecoveries = 1
 
         static func shouldDeferFind(webViewIsLoading: Bool, isDocumentReady: Bool) -> Bool {
             webViewIsLoading || !isDocumentReady
+        }
+
+        nonisolated static func isAllowedInternalNavigation(
+            url: URL,
+            isMainFrame: Bool?
+        ) -> Bool {
+            let absoluteString = (url.absoluteString.removingPercentEncoding ?? url.absoluteString)
+                .lowercased()
+            if absoluteString == "about:blank" || absoluteString.hasPrefix("about:blank#") {
+                return true
+            }
+            if
+                isMainFrame == false,
+                absoluteString == "about:srcdoc" || absoluteString.hasPrefix("about:srcdoc#")
+            {
+                return true
+            }
+            return url.scheme == nil && url.path.isEmpty && url.query == nil && url.fragment != nil
+        }
+
+        nonisolated static func isExpectedInitialInteractiveNavigation(
+            isAwaitingInitialNavigation: Bool,
+            isMainFrame: Bool?,
+            isOtherNavigation: Bool,
+            candidateURL: URL,
+            currentDocumentURL: URL?
+        ) -> Bool {
+            guard
+                isAwaitingInitialNavigation,
+                isMainFrame != false,
+                isOtherNavigation,
+                let currentDocumentURL
+            else { return false }
+
+            return candidateURL.resolvingSymlinksInPath().standardizedFileURL
+                == currentDocumentURL.resolvingSymlinksInPath().standardizedFileURL
         }
 
         init(
@@ -227,6 +264,7 @@ struct MarkdownWebView: NSViewRepresentable {
             webView.stopLoading()
             interactiveLoadFinished = false
             isDisplayingHTMLFallback = false
+            isAwaitingInitialInteractiveNavigation = false
             isDocumentReady = false
 
             if renderingMode == .interactiveHTML, let lastDocumentHTML {
@@ -234,6 +272,7 @@ struct MarkdownWebView: NSViewRepresentable {
                     showInteractiveHTMLFallbackIfNeeded(in: webView)
                     return
                 }
+                isAwaitingInitialInteractiveNavigation = true
                 webView.loadHTMLString(lastDocumentHTML, baseURL: baseURL)
             } else if let lastDocumentHTML {
                 webView.loadHTMLString(lastDocumentHTML, baseURL: nil)
@@ -242,6 +281,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             if renderingMode == .interactiveHTML, !isDisplayingHTMLFallback {
+                isAwaitingInitialInteractiveNavigation = false
                 interactiveLoadFinished = true
                 if let pendingAnchor {
                     self.pendingAnchor = nil
@@ -298,6 +338,7 @@ struct MarkdownWebView: NSViewRepresentable {
             if renderingMode == .interactiveHTML, let baseURL = interactiveDocumentURL {
                 interactiveLoadFinished = false
                 isDisplayingHTMLFallback = false
+                isAwaitingInitialInteractiveNavigation = true
                 isDocumentReady = false
                 webView.loadHTMLString(lastDocumentHTML, baseURL: baseURL)
             } else {
@@ -349,16 +390,10 @@ struct MarkdownWebView: NSViewRepresentable {
             }
 
             let scheme = url.scheme?.lowercased()
-            if
-                url.absoluteString == "about:blank" ||
-                url.absoluteString.hasPrefix("about:blank#") ||
-                (
-                    scheme == nil &&
-                    url.path.isEmpty &&
-                    url.query == nil &&
-                    url.fragment != nil
-                )
-            {
+            if Self.isAllowedInternalNavigation(
+                url: url,
+                isMainFrame: navigationAction.targetFrame?.isMainFrame
+            ) {
                 decisionHandler(.allow)
                 return
             }
@@ -373,6 +408,17 @@ struct MarkdownWebView: NSViewRepresentable {
                         )
                     else {
                         decisionHandler(.cancel)
+                        return
+                    }
+                    if Self.isExpectedInitialInteractiveNavigation(
+                        isAwaitingInitialNavigation: isAwaitingInitialInteractiveNavigation,
+                        isMainFrame: navigationAction.targetFrame?.isMainFrame,
+                        isOtherNavigation: navigationAction.navigationType == .other,
+                        candidateURL: candidate,
+                        currentDocumentURL: lastDocumentURL
+                    ) {
+                        isAwaitingInitialInteractiveNavigation = false
+                        decisionHandler(.allow)
                         return
                     }
                     guard navigationAction.targetFrame?.isMainFrame != false else {
@@ -910,6 +956,7 @@ struct MarkdownWebView: NSViewRepresentable {
                 let lastInteractiveHTMLFallback
             else { return }
             isDisplayingHTMLFallback = true
+            isAwaitingInitialInteractiveNavigation = false
             isDocumentReady = false
             webView.loadHTMLString(lastInteractiveHTMLFallback, baseURL: nil)
         }
