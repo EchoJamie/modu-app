@@ -100,7 +100,7 @@ enum SettingsWindowFocusPolicy {
 }
 
 private struct GeneralSettingsView: View {
-    @EnvironmentObject private var model: ReaderViewModel
+    @EnvironmentObject private var applicationState: ApplicationState
 
     var body: some View {
         Form {
@@ -125,15 +125,15 @@ private struct GeneralSettingsView: View {
 
     private var languageSelection: Binding<AppLanguage> {
         Binding(
-            get: { model.appLanguage },
-            set: { model.selectAppLanguage($0) }
+            get: { applicationState.appLanguage },
+            set: { applicationState.selectAppLanguage($0) }
         )
     }
 
     private var appearanceSelection: Binding<AppAppearance> {
         Binding(
-            get: { model.appAppearance },
-            set: { model.selectAppAppearance($0) }
+            get: { applicationState.appAppearance },
+            set: { applicationState.selectAppAppearance($0) }
         )
     }
 }

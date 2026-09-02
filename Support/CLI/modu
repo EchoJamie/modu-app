@@ -50,4 +50,31 @@ else
   exit 1
 fi
 
-/usr/bin/open -a "$APP_BUNDLE" "${open_targets[@]}"
+app_executable="$APP_BUNDLE/Contents/MacOS/MoDu"
+typeset -i app_is_running=0
+while IFS= read -r running_command; do
+  if [[ "$running_command" == "$app_executable" ]]; then
+    app_is_running=1
+    break
+  fi
+done < <(/bin/ps -axo command=)
+
+encode_path() {
+  /usr/bin/printf '%s' "$1" \
+    | /usr/bin/base64 \
+    | /usr/bin/tr '/+' '_-' \
+    | /usr/bin/tr -d '=\n'
+}
+
+request_id="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
+if (( app_is_running )); then
+  request_mode='new'
+else
+  request_mode='reuse'
+fi
+request_marker="modu-cli://open/$request_id?mode=$request_mode&workspace=$(encode_path "${open_targets[1]}")"
+if (( ${#open_targets[@]} == 2 )); then
+  request_marker+="&document=$(encode_path "${open_targets[2]}")"
+fi
+
+/usr/bin/open -a "$APP_BUNDLE" "$request_marker" "${open_targets[@]}"

@@ -25,6 +25,7 @@
 "settings.cli.error.helperLaunchFailed" = "系统无法打开授权助手：%@";
 "settings.cli.error.operationFailed" = "命令行工具操作失败：%@";
 
+"command.newWindow" = "新建窗口";
 "command.openFolder" = "打开目录…";
 "command.openRecent" = "打开最近使用的目录";
 "command.clearMenu" = "清除菜单";

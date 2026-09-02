@@ -39,6 +39,7 @@ enum L10n {
         case settingsCLIInstallationChanged = "settings.cli.error.installationChanged"
         case settingsCLIHelperLaunchFailed = "settings.cli.error.helperLaunchFailed"
         case settingsCLIOperationFailed = "settings.cli.error.operationFailed"
+        case commandNewWindow = "command.newWindow"
         case commandOpenFolder = "command.openFolder"
         case commandOpenRecent = "command.openRecent"
         case commandClearMenu = "command.clearMenu"

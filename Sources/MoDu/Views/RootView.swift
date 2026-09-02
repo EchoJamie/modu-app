@@ -1,9 +1,7 @@
-import Combine
 import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: ReaderViewModel
-    @EnvironmentObject private var appDelegate: AppDelegate
     @Environment(\.colorScheme) private var colorScheme
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var outlinePanelWidth = OutlinePanelLayout.restoredWidth()
@@ -83,11 +81,6 @@ struct RootView: View {
             .background(theme.canvas)
             .onAppear {
                 model.updateSystemColorScheme(colorScheme)
-                model.openDebugArgumentsIfNeeded()
-            }
-            .onReceive(appDelegate.$workspaceOpenRequest.compactMap { $0 }) { request in
-                model.openWorkspace(request)
-                appDelegate.consumeWorkspaceOpenRequest(id: request.id)
             }
             .onChange(of: colorScheme) { newColorScheme in
                 model.updateSystemColorScheme(newColorScheme)

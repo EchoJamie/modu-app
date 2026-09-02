@@ -34,6 +34,235 @@ struct DocumentGovernanceTests {
         #expect(window.firstResponder === window)
     }
 
+    @Test("Reader windows isolate documents and outlines while sharing preferences")
+    @MainActor
+    func readerWindowStateIsolation() throws {
+        _ = NSApplication.shared
+        let suiteName = "ReaderWindowStateTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let applicationState = ApplicationState(
+            defaults: defaults,
+            restoreRecentWorkspaces: false
+        )
+        let firstWindow = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let secondWindow = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let documentURL = URL(fileURLWithPath: "/tmp/first-window.md")
+        let outline = OutlineItem(title: "First Window", level: 1, anchor: "first-window")
+        let rendered = RenderedDocument(
+            content: .styledHTML("<h1>First Window</h1>"),
+            outline: [outline],
+            fileSize: 23,
+            modifiedAt: nil
+        )
+        var firstPane = ReaderPaneState()
+        firstPane.selectedURL = documentURL
+        firstPane.documentState = .loaded(documentURL, rendered)
+        firstPane.selectedOutlineID = outline.id
+        firstWindow.installPaneStateForTesting(firstPane, in: .primary)
+        firstWindow.outlineIsVisible = false
+
+        #expect(firstWindow.selectedURL == documentURL)
+        #expect(firstWindow.outlineItems(for: .primary).map(\.title) == ["First Window"])
+        #expect(firstWindow.selectedOutlineID == outline.id)
+        #expect(!firstWindow.outlineIsVisible)
+        #expect(secondWindow.selectedURL == nil)
+        #expect(secondWindow.outlineItems(for: .primary).isEmpty)
+        #expect(secondWindow.selectedOutlineID == nil)
+        #expect(secondWindow.outlineIsVisible)
+
+        firstWindow.selectMarkdownStyle(.github)
+        #expect(firstWindow.markdownStyle == .github)
+        #expect(secondWindow.markdownStyle == .github)
+    }
+
+    @Test("External open requests target only the active reader window")
+    @MainActor
+    func externalOpenRequestWindowRouting() throws {
+        _ = NSApplication.shared
+        let suiteName = "ReaderWindowRoutingTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let applicationState = ApplicationState(
+            defaults: defaults,
+            restoreRecentWorkspaces: false
+        )
+        let firstModel = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let secondModel = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let firstWindow = NSWindow()
+        let secondWindow = NSWindow()
+        let firstID = UUID()
+        let secondID = UUID()
+        let delegate = AppDelegate()
+        delegate.registerReaderWindow(id: firstID, window: firstWindow, model: firstModel)
+        delegate.registerReaderWindow(id: secondID, window: secondWindow, model: secondModel)
+
+        try withTemporaryRoot { secondRoot in
+            delegate.readerWindowDidBecomeKey(id: secondID)
+            delegate.routeWorkspaceOpenRequest(
+                WorkspaceOpenRequest(workspaceURL: secondRoot)
+            )
+            #expect(firstModel.rootURL == nil)
+            #expect(secondModel.rootURL == secondRoot.standardizedFileURL)
+
+            try withTemporaryRoot { firstRoot in
+                delegate.readerWindowDidBecomeKey(id: firstID)
+                delegate.routeWorkspaceOpenRequest(
+                    WorkspaceOpenRequest(workspaceURL: firstRoot)
+                )
+                #expect(firstModel.rootURL == firstRoot.standardizedFileURL)
+                #expect(secondModel.rootURL == secondRoot.standardizedFileURL)
+            }
+        }
+    }
+
+    @Test("Command-line requests reuse the launch window and then open new windows")
+    @MainActor
+    func commandLineRequestCreatesNewWindow() throws {
+        _ = NSApplication.shared
+        let suiteName = "CLIReaderWindowRoutingTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let applicationState = ApplicationState(
+            defaults: defaults,
+            restoreRecentWorkspaces: false
+        )
+        let firstModel = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let secondModel = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let firstWindow = NSWindow()
+        let secondWindow = NSWindow()
+        defer { withExtendedLifetime((firstWindow, secondWindow)) {} }
+        let delegate = AppDelegate()
+        delegate.registerReaderWindow(
+            id: UUID(),
+            window: firstWindow,
+            model: firstModel
+        )
+        var requestedWindowCount = 0
+        delegate.registerReaderWindowOpener {
+            requestedWindowCount += 1
+        }
+
+        let launchRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("modu-tests-\(UUID().uuidString)", isDirectory: true)
+        let newWindowRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("modu-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: launchRoot,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: newWindowRoot,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: launchRoot)
+            try? FileManager.default.removeItem(at: newWindowRoot)
+        }
+        let launchMarker = try #require(
+            WorkspaceOpenRequest.commandLineWindowMarkerURL(
+                workspaceURL: launchRoot,
+                opensNewWindow: false
+            )
+        )
+        delegate.processExternalURLs(
+            [launchMarker, launchRoot]
+        )
+        #expect(requestedWindowCount == 0)
+        #expect(firstModel.rootURL == launchRoot.standardizedFileURL)
+
+        let newWindowMarker = try #require(
+            WorkspaceOpenRequest.commandLineWindowMarkerURL(
+                workspaceURL: newWindowRoot,
+                opensNewWindow: true
+            )
+        )
+        delegate.processExternalURLs(
+            [newWindowMarker, newWindowRoot]
+        )
+
+        #expect(requestedWindowCount == 1)
+        #expect(firstModel.rootURL == launchRoot.standardizedFileURL)
+
+        delegate.registerReaderWindow(
+            id: UUID(),
+            window: secondWindow,
+            model: secondModel
+        )
+        #expect(secondModel.rootURL == newWindowRoot.standardizedFileURL)
+        #expect(firstModel.rootURL == launchRoot.standardizedFileURL)
+    }
+
+    @Test("Cold external open preserves the file across split URL delivery")
+    @MainActor
+    func coldExternalOpenRequestMerging() throws {
+        _ = NSApplication.shared
+        let suiteName = "ColdReaderWindowRoutingTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let applicationState = ApplicationState(
+            defaults: defaults,
+            restoreRecentWorkspaces: false
+        )
+        let model = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: applicationState
+        )
+        let delegate = AppDelegate()
+        let window = NSWindow()
+
+        try withTemporaryRoot { root in
+            let documentURL = root.appendingPathComponent("cold-open.md")
+            try "# Cold open\n".write(
+                to: documentURL,
+                atomically: true,
+                encoding: .utf8
+            )
+
+            delegate.routeWorkspaceOpenRequest(
+                WorkspaceOpenRequest(workspaceURL: root, documentURL: documentURL)
+            )
+            delegate.routeWorkspaceOpenRequest(
+                WorkspaceOpenRequest(workspaceURL: root)
+            )
+            delegate.registerReaderWindow(
+                id: UUID(),
+                window: window,
+                model: model
+            )
+
+            #expect(model.rootURL == root.standardizedFileURL)
+            #expect(model.selectedURL == documentURL.standardizedFileURL)
+
+            delegate.routeWorkspaceOpenRequest(
+                WorkspaceOpenRequest(workspaceURL: root)
+            )
+            #expect(model.selectedURL == documentURL.standardizedFileURL)
+        }
+    }
+
     @Test("Preview classification is pure and requires regular-file metadata")
     func previewClassification() throws {
         #expect(
@@ -185,6 +414,30 @@ struct DocumentGovernanceTests {
             )
             #expect(fileOnlyRequest.workspaceURL == root.standardizedFileURL)
             #expect(fileOnlyRequest.documentURL == documentURL.standardizedFileURL)
+
+            let commandLineMarker = try #require(
+                WorkspaceOpenRequest.commandLineWindowMarkerURL(
+                    workspaceURL: root,
+                    documentURL: documentURL,
+                    opensNewWindow: true
+                )
+            )
+            #expect(WorkspaceOpenRequest.isCommandLineWindowMarker(commandLineMarker))
+            #expect(!WorkspaceOpenRequest.isCommandLineWindowMarker(documentURL))
+            let markedRequest = try #require(
+                WorkspaceOpenRequest.resolve(
+                    urls: [commandLineMarker, root, documentURL]
+                )
+            )
+            #expect(markedRequest.workspaceURL == fileRequest.workspaceURL)
+            #expect(markedRequest.documentURL == fileRequest.documentURL)
+            let commandLineRequests = WorkspaceOpenRequest.commandLineWindowRequests(
+                from: [commandLineMarker, root, documentURL]
+            )
+            #expect(commandLineRequests.count == 1)
+            #expect(commandLineRequests.first?.opensNewWindow == true)
+            #expect(commandLineRequests.first?.workspaceRequest.workspaceURL == root)
+            #expect(commandLineRequests.first?.workspaceRequest.documentURL == documentURL)
 
             let outsideRoot = FileManager.default.temporaryDirectory
                 .appendingPathComponent("modu-tests-\(UUID().uuidString)", isDirectory: true)

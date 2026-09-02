@@ -25,6 +25,7 @@
 "settings.cli.error.helperLaunchFailed" = "The system could not open the authorization helper: %@";
 "settings.cli.error.operationFailed" = "Command-line tool operation failed: %@";
 
+"command.newWindow" = "New Window";
 "command.openFolder" = "Open Folder…";
 "command.openRecent" = "Open Recent";
 "command.clearMenu" = "Clear Menu";

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
@@ -109,12 +110,10 @@ final class ReaderViewModel: ObservableObject {
     @Published var activePane: ReaderPaneID = .primary
 
     @Published var outlineIsVisible = true
-    @Published private(set) var appLanguage: AppLanguage
-    @Published private(set) var appAppearance: AppAppearance
-    @Published private(set) var markdownStyle: MarkdownStyle
     @Published private(set) var systemColorScheme: ColorScheme
-    @Published private(set) var recentWorkspaces: [RecentWorkspace] = []
     @Published private(set) var fileOperationError: String?
+    private let applicationState: ApplicationState
+    private var applicationStateSubscriptions: Set<AnyCancellable> = []
     private var workspaceAccessSession: WorkspaceAccessSession?
     private var rootTask: Task<Void, Never>?
     private var workspaceGeneration = UUID()
@@ -124,46 +123,47 @@ final class ReaderViewModel: ObservableObject {
     private var debugArgumentsHandled = false
     private var debugLineJumpRequested = false
 
-    private static let recentWorkspaceBookmarksKey = "recentWorkspaceBookmarks.v1"
-    private static let readerThemeKey = "readerTheme.v2"
-    private static let maximumRecentWorkspaceCount = 8
-
     init(
         restorePersistedState: Bool = true,
+        applicationState: ApplicationState? = nil,
         documentLoadCompletionBarrier: (@Sendable (URL, UUID) async -> Void)? = nil
     ) {
         self.documentLoadCompletionBarrier = documentLoadCompletionBarrier
-        let defaults = UserDefaults.standard
-        let legacyTheme = defaults.string(forKey: "readerTheme")
+        self.applicationState = applicationState
+            ?? ApplicationState(restoreRecentWorkspaces: restorePersistedState)
         systemColorScheme = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? .dark
             : .light
-
-        let savedTheme = defaults.string(forKey: Self.readerThemeKey)
-            ?? defaults.string(forKey: "markdownStyle")
-            ?? legacyTheme
-        markdownStyle = MarkdownStyle.migrated(from: savedTheme) ?? .newsprint
-        appLanguage = AppLanguage.restored(from: defaults)
-
-        if
-            let savedAppearance = defaults.string(forKey: "appAppearance"),
-            let restored = AppAppearance(rawValue: savedAppearance)
-        {
-            appAppearance = restored
-        } else if legacyTheme == "dark" || legacyTheme == "graphite" {
-            appAppearance = .dark
-        } else if legacyTheme != nil {
-            appAppearance = .light
-        } else {
-            appAppearance = .system
-        }
+        observeApplicationState()
 
         if restorePersistedState {
-            restoreRecentWorkspaces()
             if let mostRecentWorkspace = recentWorkspaces.first {
                 openRecentWorkspace(mostRecentWorkspace, reportFailure: false)
             }
         }
+    }
+
+    private func observeApplicationState() {
+        applicationState.objectWillChange
+            .sink { [weak self] in
+                self?.objectWillChange.send()
+            }
+            .store(in: &applicationStateSubscriptions)
+
+        applicationState.$appLanguage
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.reloadSelectedDocumentsForLanguageChange()
+            }
+            .store(in: &applicationStateSubscriptions)
+
+        applicationState.$appAppearance
+            .dropFirst()
+            .sink { [weak self] appearance in
+                guard appearance == .system else { return }
+                self?.refreshSystemColorSchemeAfterAppearanceReset()
+            }
+            .store(in: &applicationStateSubscriptions)
     }
 
     var rootName: String { rootURL?.lastPathComponent ?? L10n.string(.workspaceNotOpened) }
@@ -177,6 +177,10 @@ final class ReaderViewModel: ObservableObject {
     var referenceSelectedOutlineID: UUID? { paneStates[.reference]?.selectedOutlineID }
     var hasSecondPane: Bool { paneStates[.reference] != nil }
     var currentTitle: String { currentTitle(for: activePane) }
+    var appLanguage: AppLanguage { applicationState.appLanguage }
+    var appAppearance: AppAppearance { applicationState.appAppearance }
+    var markdownStyle: MarkdownStyle { applicationState.markdownStyle }
+    var recentWorkspaces: [RecentWorkspace] { applicationState.recentWorkspaces }
     var resolvedTheme: ResolvedReaderTheme {
         ResolvedReaderTheme(
             style: markdownStyle,
@@ -1257,11 +1261,7 @@ final class ReaderViewModel: ObservableObject {
         setDocumentTask(task, in: pane)
     }
 
-    func selectAppLanguage(_ newLanguage: AppLanguage) {
-        guard appLanguage != newLanguage else { return }
-        UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
-        appLanguage = newLanguage
-
+    private func reloadSelectedDocumentsForLanguageChange() {
         let selectedDocuments = paneStates.compactMap { pane, state in
             state.selectedURL.map { (pane, $0) }
         }
@@ -1270,12 +1270,7 @@ final class ReaderViewModel: ObservableObject {
         }
     }
 
-    func selectAppAppearance(_ newAppearance: AppAppearance) {
-        guard appAppearance != newAppearance else { return }
-        appAppearance = newAppearance
-        UserDefaults.standard.set(newAppearance.rawValue, forKey: "appAppearance")
-        guard newAppearance == .system else { return }
-
+    private func refreshSystemColorSchemeAfterAppearanceReset() {
         // preferredColorScheme 解除后，NSApp 的有效外观会在后续主循环才恢复为系统值。
         // 延后刷新，避免 WebView 使用切换前的强制明暗配色。
         DispatchQueue.main.async { [weak self] in
@@ -1291,10 +1286,7 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func selectMarkdownStyle(_ newStyle: MarkdownStyle) {
-        guard markdownStyle != newStyle else { return }
-        markdownStyle = newStyle
-        UserDefaults.standard.set(newStyle.rawValue, forKey: Self.readerThemeKey)
-        UserDefaults.standard.set(newStyle.rawValue, forKey: "markdownStyle")
+        applicationState.selectMarkdownStyle(newStyle)
     }
 
     func updateSystemColorScheme(_ newColorScheme: ColorScheme) {
@@ -1308,8 +1300,7 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func clearRecentWorkspaces() {
-        recentWorkspaces = []
-        UserDefaults.standard.removeObject(forKey: Self.recentWorkspaceBookmarksKey)
+        applicationState.clearRecentWorkspaces()
     }
 
     func scroll(to item: OutlineItem, in pane: ReaderPaneID) {
@@ -1660,54 +1651,9 @@ final class ReaderViewModel: ObservableObject {
         return urls.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
-    private func restoreRecentWorkspaces() {
-        let storedValues = UserDefaults.standard.array(forKey: Self.recentWorkspaceBookmarksKey) ?? []
-        let storedBookmarks = storedValues.compactMap { $0 as? Data }
-        var restored: [RecentWorkspace] = []
-        var seenPaths: Set<String> = []
-
-        for bookmarkData in storedBookmarks {
-            guard restored.count < Self.maximumRecentWorkspaceCount else { break }
-            guard let workspace = resolvedRecentWorkspace(from: bookmarkData) else { continue }
-            guard seenPaths.insert(workspace.id).inserted else { continue }
-            restored.append(workspace)
-        }
-
-        recentWorkspaces = restored
-        persistRecentWorkspaces()
-    }
-
-    private func resolvedRecentWorkspace(from bookmarkData: Data) -> RecentWorkspace? {
-        do {
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            let didStartAccessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessing { url.stopAccessingSecurityScopedResource() }
-            }
-
-            var isDirectory: ObjCBool = false
-            guard
-                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            else { return nil }
-
-            let currentBookmark = isStale ? try makeBookmark(for: url) : bookmarkData
-            return RecentWorkspace(url: url, bookmarkData: currentBookmark)
-        } catch {
-            return nil
-        }
-    }
-
     private func openRecentWorkspace(_ workspace: RecentWorkspace, reportFailure: Bool) {
-        guard let resolvedWorkspace = resolvedRecentWorkspace(from: workspace.bookmarkData) else {
-            recentWorkspaces.removeAll { $0.id == workspace.id }
-            persistRecentWorkspaces()
+        guard let resolvedWorkspace = applicationState.resolvedRecentWorkspace(workspace) else {
+            applicationState.removeRecentWorkspace(id: workspace.id)
             if reportFailure {
                 fileOperationError = ReaderFileOperationError.workspaceUnavailable.localizedDescription
             }
@@ -1718,33 +1664,14 @@ final class ReaderViewModel: ObservableObject {
 
     private func rememberWorkspace(_ url: URL, existingBookmarkData: Data?) {
         do {
-            let bookmarkData = try existingBookmarkData ?? makeBookmark(for: url)
-            let workspace = RecentWorkspace(url: url, bookmarkData: bookmarkData)
-            recentWorkspaces.removeAll { $0.id == workspace.id }
-            recentWorkspaces.insert(workspace, at: 0)
-            if recentWorkspaces.count > Self.maximumRecentWorkspaceCount {
-                recentWorkspaces.removeLast(recentWorkspaces.count - Self.maximumRecentWorkspaceCount)
-            }
-            persistRecentWorkspaces()
+            try applicationState.rememberWorkspace(
+                url,
+                existingBookmarkData: existingBookmarkData
+            )
         } catch {
             fileOperationError = ReaderFileOperationError
                 .bookmarkCreationFailed(error.localizedDescription)
                 .localizedDescription
         }
-    }
-
-    private func makeBookmark(for url: URL) throws -> Data {
-        try url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: [.isDirectoryKey],
-            relativeTo: nil
-        )
-    }
-
-    private func persistRecentWorkspaces() {
-        UserDefaults.standard.set(
-            recentWorkspaces.map(\.bookmarkData),
-            forKey: Self.recentWorkspaceBookmarksKey
-        )
     }
 }
