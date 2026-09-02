@@ -71,6 +71,26 @@ struct DocumentGovernanceTests {
         #expect(rendered.sourcePage?.page.index == 0)
     }
 
+    @Test("Application language preference restores explicit and system modes")
+    func applicationLanguagePreference() throws {
+        let suiteName = "AppLanguageTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(AppLanguage.restored(from: defaults) == .system)
+        defaults.set(AppLanguage.english.rawValue, forKey: AppLanguage.storageKey)
+        #expect(AppLanguage.restored(from: defaults) == .english)
+        #expect(AppLanguage.english.resolvedLocalization == "en")
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: AppLanguage.storageKey
+        )
+        #expect(AppLanguage.restored(from: defaults) == .simplifiedChinese)
+        #expect(AppLanguage.simplifiedChinese.resolvedLocalization == "zh-Hans")
+        defaults.set("unsupported", forKey: AppLanguage.storageKey)
+        #expect(AppLanguage.restored(from: defaults) == .system)
+    }
+
     @Test("Large structured documents degrade to unbounded paged source")
     func structuredDocumentLoadPolicy() {
         let limit = Int64(LocalDocumentResourcePolicy.maximumStructuredDocumentBytes)
@@ -113,6 +133,148 @@ struct DocumentGovernanceTests {
             rejected = true
         }
         #expect(rejected)
+    }
+
+    @Test("External open requests distinguish workspaces and files")
+    func externalWorkspaceOpenRequests() throws {
+        try withTemporaryRoot { root in
+            let documentURL = root.appendingPathComponent("README.md")
+            try "# Command line\n".write(
+                to: documentURL,
+                atomically: true,
+                encoding: .utf8
+            )
+
+            let directoryRequest = try #require(
+                WorkspaceOpenRequest.resolve(urls: [root])
+            )
+            #expect(directoryRequest.workspaceURL == root.standardizedFileURL)
+            #expect(directoryRequest.documentURL == nil)
+
+            let fileRequest = try #require(
+                WorkspaceOpenRequest.resolve(urls: [root, documentURL])
+            )
+            #expect(fileRequest.workspaceURL == root.standardizedFileURL)
+            #expect(fileRequest.documentURL == documentURL.standardizedFileURL)
+
+            let fileOnlyRequest = try #require(
+                WorkspaceOpenRequest.resolve(urls: [documentURL])
+            )
+            #expect(fileOnlyRequest.workspaceURL == root.standardizedFileURL)
+            #expect(fileOnlyRequest.documentURL == documentURL.standardizedFileURL)
+
+            let outsideRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("modu-tests-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: outsideRoot,
+                withIntermediateDirectories: true
+            )
+            defer { try? FileManager.default.removeItem(at: outsideRoot) }
+            let outsideDocument = outsideRoot.appendingPathComponent("outside.md")
+            try "outside\n".write(
+                to: outsideDocument,
+                atomically: true,
+                encoding: .utf8
+            )
+
+            let boundedRequest = try #require(
+                WorkspaceOpenRequest.resolve(urls: [root, outsideDocument])
+            )
+            #expect(boundedRequest.workspaceURL == root.standardizedFileURL)
+            #expect(boundedRequest.documentURL == nil)
+            #expect(
+                WorkspaceOpenRequest.resolve(
+                    urls: [root.appendingPathComponent("missing")]
+                ) == nil
+            )
+        }
+    }
+
+    @Test("Command-line tool installation is durable and protects existing items")
+    @MainActor
+    func commandLineToolInstallation() throws {
+        try withTemporaryRoot { root in
+            #expect(CommandLineToolInstaller.systemInstallationURL.path == "/usr/local/bin/modu")
+
+            let appURL = root
+                .appendingPathComponent("Applications", isDirectory: true)
+                .appendingPathComponent("MoDu Preview's.app", isDirectory: true)
+            let launcherURL = appURL
+                .appendingPathComponent("Contents/Resources/CLI", isDirectory: true)
+                .appendingPathComponent("modu")
+            let installationDirectory = root.appendingPathComponent("bin", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: launcherURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                at: installationDirectory,
+                withIntermediateDirectories: true
+            )
+            try "#!/bin/zsh\n".write(to: launcherURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: launcherURL.path
+            )
+
+            let targetURL = installationDirectory.appendingPathComponent("modu")
+            let performOperation: (CommandLineToolOperation) throws -> Void = { operation in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = [
+                    "-c",
+                    CommandLineToolInstaller.privilegedShellCommand(for: operation)
+                ]
+                try process.run()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else {
+                    throw CommandLineToolInstallerError.privilegedOperation(
+                        "Shell exited with \(process.terminationStatus)"
+                    )
+                }
+            }
+            let installer = CommandLineToolInstaller(
+                applicationURL: appURL,
+                bundledToolURL: launcherURL,
+                installationURL: targetURL,
+                performPrivilegedOperation: performOperation
+            )
+
+            try installer.install()
+            #expect(installer.installedURL == targetURL.standardizedFileURL)
+            #expect(
+                try FileManager.default.destinationOfSymbolicLink(atPath: targetURL.path)
+                    == launcherURL.path
+            )
+
+            let restoredInstaller = CommandLineToolInstaller(
+                applicationURL: appURL,
+                bundledToolURL: launcherURL,
+                installationURL: targetURL,
+                performPrivilegedOperation: performOperation
+            )
+            #expect(restoredInstaller.installedURL == targetURL.standardizedFileURL)
+
+            try FileManager.default.removeItem(at: targetURL)
+            try "existing\n".write(to: targetURL, atomically: true, encoding: .utf8)
+            #expect(throws: CommandLineToolInstallerError.targetExists) {
+                try installer.install()
+            }
+            try installer.install(replacingExisting: true)
+            #expect(
+                try FileManager.default.destinationOfSymbolicLink(atPath: targetURL.path)
+                    == launcherURL.path
+            )
+
+            try installer.uninstall()
+            #expect(installer.installedURL == nil)
+            #expect(!FileManager.default.fileExists(atPath: targetURL.path))
+
+            try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: false)
+            #expect(throws: CommandLineToolInstallerError.targetIsDirectory) {
+                try installer.install(replacingExisting: true)
+            }
+        }
     }
 
     @Test("Local HTML resources round-trip through the bounded workspace scheme")

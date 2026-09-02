@@ -3,17 +3,21 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
-APP_DIR="$PROJECT_DIR/build/MoDu.app"
+FORMAL_BUILD_DIR="$PROJECT_DIR/build/.formal"
+APP_DIR="$FORMAL_BUILD_DIR/MoDu.app"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Config/Info.plist")"
 DMG_PATH="$PROJECT_DIR/build/MoDu-$APP_VERSION.dmg"
 STAGING_DIR="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/modu-dmg.XXXXXX")"
 
 cleanup() {
   /bin/rm -rf "$STAGING_DIR"
+  if [[ "$FORMAL_BUILD_DIR" == "$PROJECT_DIR/build/.formal" ]]; then
+    /bin/rm -rf "$FORMAL_BUILD_DIR"
+  fi
 }
 trap cleanup EXIT
 
-"$SCRIPT_DIR/build_app.sh"
+MODU_BUILD_FLAVOR=formal "$SCRIPT_DIR/build_app.sh"
 /usr/bin/ditto "$APP_DIR" "$STAGING_DIR/MoDu.app"
 /bin/ln -s /Applications "$STAGING_DIR/Applications"
 /bin/rm -f "$DMG_PATH"

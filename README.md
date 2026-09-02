@@ -52,14 +52,34 @@ swift test
 
 ```bash
 ./scripts/build_app.sh
-open build/MoDu.app
+open 'build/MoDu Preview.app'
 ```
 
-构建脚本会先解析锁定的 SwiftPM 依赖，核对实际 checkout 的提交与 clean 状态，再执行测试与第三方资源校验；签名后分别使用英文和简体中文执行正式沙盒 WKWebView 冒烟检查。构建结果位于 `build/MoDu.app`，构建追溯信息位于 `build/release-manifest.txt`。如需生成 DMG：
+构建脚本会先解析锁定的 SwiftPM 依赖，核对实际 checkout 的提交与 clean 状态，再执行测试与第三方资源校验；签名后分别使用英文和简体中文执行正式沙盒 WKWebView 冒烟检查。仓库内的持续开发验证产物位于 `build/MoDu Preview.app`，使用独立的显示名称和 Bundle Identifier，避免与正式安装的 MoDu 混淆；构建追溯信息位于 `build/release-manifest.txt`。如需生成 DMG：
 
 ```bash
 ./scripts/package_dmg.sh
 ```
+
+DMG 内的正式应用仍为 `MoDu.app`（中文显示“墨读”）。正式应用只在打包期间生成于隐藏的临时构建目录，写入 DMG 后即清理，不会在仓库内留下第二个同名应用。
+
+应用语言与明暗模式统一在“MoDu（墨读）> 设置…（⌘,）”中管理；语言支持跟随系统、English 和简体中文，修改后立即应用并在下次启动时保留。
+
+## 命令行启动
+
+正式应用内置 `modu` 启动器。打开“MoDu（墨读）> 设置…（⌘,）”，在“命令行工具”中点击“安装”，MoDu 会按 macOS 的第三方命令约定安装到 `/usr/local/bin/modu`，无需选择目录；如果系统要求写入授权，只会出现标准管理员授权框。安装后同一设置会显示实际路径并提供“卸载”，且只会删除仍指向当前 MoDu 的命令链接。
+
+命令行入口支持当前目录、其他目录或单个常规文件：
+
+```bash
+modu .
+modu /path/to/workspace
+modu /path/to/file.md
+modu --help
+modu --version
+```
+
+打开文件时，MoDu 会把文件所在目录作为工作区并立即打开该文件。启动器通过 macOS LaunchServices 把路径交给应用；无论 MoDu 是否已经运行，都不会通过未授权的进程参数绕过应用沙盒。
 
 正式交付默认拒绝包含未提交或未跟踪输入的工作树。仅需验证开发态改动时可显式使用 `ALLOW_DIRTY_BUILD=1`；此时 `build/` 会额外保留完整二进制 patch 和未跟踪文件归档，不能将其当作基于提交的正式发布。
 

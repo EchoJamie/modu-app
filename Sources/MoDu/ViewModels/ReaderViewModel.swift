@@ -109,6 +109,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var activePane: ReaderPaneID = .primary
 
     @Published var outlineIsVisible = true
+    @Published private(set) var appLanguage: AppLanguage
     @Published private(set) var appAppearance: AppAppearance
     @Published private(set) var markdownStyle: MarkdownStyle
     @Published private(set) var systemColorScheme: ColorScheme
@@ -142,6 +143,7 @@ final class ReaderViewModel: ObservableObject {
             ?? defaults.string(forKey: "markdownStyle")
             ?? legacyTheme
         markdownStyle = MarkdownStyle.migrated(from: savedTheme) ?? .newsprint
+        appLanguage = AppLanguage.restored(from: defaults)
 
         if
             let savedAppearance = defaults.string(forKey: "appAppearance"),
@@ -308,6 +310,13 @@ final class ReaderViewModel: ObservableObject {
 
     func openWorkspace(_ url: URL) {
         openWorkspace(url, bookmarkData: nil)
+    }
+
+    func openWorkspace(_ request: WorkspaceOpenRequest) {
+        openWorkspace(request.workspaceURL)
+        if let documentURL = request.documentURL {
+            loadDocument(at: documentURL, in: .primary)
+        }
     }
 
     private func openWorkspace(_ url: URL, bookmarkData: Data?) {
@@ -1246,6 +1255,19 @@ final class ReaderViewModel: ObservableObject {
             }
         }
         setDocumentTask(task, in: pane)
+    }
+
+    func selectAppLanguage(_ newLanguage: AppLanguage) {
+        guard appLanguage != newLanguage else { return }
+        UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
+        appLanguage = newLanguage
+
+        let selectedDocuments = paneStates.compactMap { pane, state in
+            state.selectedURL.map { (pane, $0) }
+        }
+        for (pane, url) in selectedDocuments {
+            loadDocument(at: url, in: pane)
+        }
     }
 
     func selectAppAppearance(_ newAppearance: AppAppearance) {

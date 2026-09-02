@@ -5,8 +5,10 @@ SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
 MANIFEST="$PROJECT_DIR/Config/third-party-components.json"
 DESTINATION="${1:-}"
+PREVIEW_DESTINATION="$PROJECT_DIR/build/MoDu Preview.app/Contents/Resources/ThirdPartyLicenses"
+FORMAL_DESTINATION="$PROJECT_DIR/build/.formal/MoDu.app/Contents/Resources/ThirdPartyLicenses"
 
-if [[ -z "$DESTINATION" || "$DESTINATION" != "$PROJECT_DIR/build/MoDu.app/Contents/Resources/ThirdPartyLicenses" ]]; then
+if [[ -z "$DESTINATION" || ("$DESTINATION" != "$PREVIEW_DESTINATION" && "$DESTINATION" != "$FORMAL_DESTINATION") ]]; then
   print -u2 "拒绝复制到非预期许可证目录：$DESTINATION"
   exit 1
 fi

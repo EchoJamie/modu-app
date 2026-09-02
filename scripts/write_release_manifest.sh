@@ -3,7 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
-APP_DIR="${2:-$PROJECT_DIR/build/MoDu.app}"
+PREVIEW_APP_DIR="$PROJECT_DIR/build/MoDu Preview.app"
+FORMAL_APP_DIR="$PROJECT_DIR/build/.formal/MoDu.app"
+APP_DIR="${2:-$PREVIEW_APP_DIR}"
 MODE="${1:-prepare}"
 MANIFEST="$PROJECT_DIR/build/release-manifest.txt"
 APP_MANIFEST="$APP_DIR/Contents/Resources/BuildManifest.txt"
@@ -12,7 +14,11 @@ SOURCE_PATCH="$PROJECT_DIR/build/source-state.patch"
 UNTRACKED_LIST="$PROJECT_DIR/build/source-state-untracked.txt"
 UNTRACKED_ARCHIVE="$PROJECT_DIR/build/source-state-untracked.tar"
 
-if [[ "$APP_DIR" != "$PROJECT_DIR/build/MoDu.app" || ! -d "$APP_DIR" ]]; then
+if [[ "$APP_DIR" != "$PREVIEW_APP_DIR" && "$APP_DIR" != "$FORMAL_APP_DIR" ]]; then
+  print -u2 "拒绝为非预期应用目录生成追溯信息：$APP_DIR"
+  exit 1
+fi
+if [[ ! -d "$APP_DIR" ]]; then
   print -u2 "拒绝为非预期应用目录生成追溯信息：$APP_DIR"
   exit 1
 fi

@@ -16,8 +16,32 @@ enum AppResources {
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
         case appName = "app.name"
+        case commonCancel = "common.cancel"
         case commonOK = "common.ok"
         case commonUnknownError = "common.unknownError"
+        case settingsGeneralTitle = "settings.general.title"
+        case settingsLanguage = "settings.language"
+        case settingsAppearance = "settings.appearance"
+        case languageSystem = "language.system"
+        case languageEnglish = "language.english"
+        case languageSimplifiedChinese = "language.simplifiedChinese"
+        case settingsCLITitle = "settings.cli.title"
+        case settingsCLIDescription = "settings.cli.description"
+        case settingsCLIInstalled = "settings.cli.installed"
+        case settingsCLINotInstalled = "settings.cli.notInstalled"
+        case settingsCLIInstall = "settings.cli.install"
+        case settingsCLIUninstall = "settings.cli.uninstall"
+        case settingsCLIReplaceTitle = "settings.cli.replace.title"
+        case settingsCLIReplaceMessage = "settings.cli.replace.message"
+        case settingsCLIReplace = "settings.cli.replace"
+        case settingsCLIMissingTool = "settings.cli.error.missingTool"
+        case settingsCLITemporaryApp = "settings.cli.error.temporaryApp"
+        case settingsCLITargetExists = "settings.cli.error.targetExists"
+        case settingsCLITargetDirectory = "settings.cli.error.targetDirectory"
+        case settingsCLIInstallationChanged = "settings.cli.error.installationChanged"
+        case settingsCLIAuthorizationCancelled = "settings.cli.error.authorizationCancelled"
+        case settingsCLIPrivilegedOperationFailed = "settings.cli.error.privilegedOperationFailed"
+        case settingsCLIOperationFailed = "settings.cli.error.operationFailed"
         case commandOpenFolder = "command.openFolder"
         case commandOpenRecent = "command.openRecent"
         case commandClearMenu = "command.clearMenu"
@@ -25,7 +49,6 @@ enum L10n {
         case commandReloadDocumentOutline = "command.reloadDocumentOutline"
         case commandReloadDirectory = "command.reloadDirectory"
         case commandTheme = "command.theme"
-        case commandDisplayMode = "command.displayMode"
         case commandOpenSecondPane = "command.openSecondPane"
         case commandCloseActivePane = "command.closeActivePane"
         case commandFindInDocument = "command.findInDocument"
@@ -65,7 +88,7 @@ enum L10n {
         case folderPickerMessage = "folderPicker.message"
         case folderPickerPrompt = "folderPicker.prompt"
         case sidebarLoading = "sidebar.loading"
-        case sidebarPrivacyNote = "sidebar.privacyNote"
+        case sidebarTagline = "sidebar.tagline"
         case sidebarOperationFailed = "sidebar.operationFailed"
         case sidebarChooseWorkspace = "sidebar.chooseWorkspace"
         case sidebarCurrentWorkspaceSwitch = "sidebar.currentWorkspaceSwitch"
@@ -92,7 +115,6 @@ enum L10n {
         case toolbarReloadHelp = "toolbar.reloadHelp"
         case toolbarOpenSplitHelp = "toolbar.openSplitHelp"
         case toolbarCloseSplitHelp = "toolbar.closeSplitHelp"
-        case toolbarDisplayModeHelp = "toolbar.displayModeHelp"
         case toolbarThemeHelp = "toolbar.themeHelp"
         case fileTreeOpenOtherPane = "fileTree.openOtherPane"
         case fileTreeRename = "fileTree.rename"
@@ -142,10 +164,7 @@ enum L10n {
     }
 
     static var currentLanguage: String {
-        Bundle.preferredLocalizations(
-            from: supportedLanguages,
-            forPreferences: Locale.preferredLanguages
-        ).first ?? "en"
+        AppLanguage.restored().resolvedLocalization
     }
 
     static func string(_ key: Key) -> String {

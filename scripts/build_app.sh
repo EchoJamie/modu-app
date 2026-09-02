@@ -3,11 +3,35 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
-APP_DIR="$PROJECT_DIR/build/MoDu.app"
+BUILD_FLAVOR="${MODU_BUILD_FLAVOR:-preview}"
+PREVIEW_APP_DIR="$PROJECT_DIR/build/MoDu Preview.app"
+FORMAL_APP_DIR="$PROJECT_DIR/build/.formal/MoDu.app"
+LEGACY_APP_DIR="$PROJECT_DIR/build/MoDu.app"
+case "$BUILD_FLAVOR" in
+  preview)
+    APP_DIR="$PREVIEW_APP_DIR"
+    EXPECTED_BUNDLE_IDENTIFIER="com.local.modu.preview"
+    EXPECTED_ENGLISH_NAME="MoDu Preview"
+    EXPECTED_CHINESE_NAME="墨读预览版"
+    ;;
+  formal)
+    APP_DIR="$FORMAL_APP_DIR"
+    EXPECTED_BUNDLE_IDENTIFIER="com.local.modu"
+    EXPECTED_ENGLISH_NAME="MoDu"
+    EXPECTED_CHINESE_NAME="墨读"
+    ;;
+  *)
+    print -u2 "未知应用构建类型：$BUILD_FLAVOR"
+    exit 1
+    ;;
+esac
 CONTENTS_DIR="$APP_DIR/Contents"
 ICON_SOURCE="$PROJECT_DIR/Config/AppIcon-1024.png"
 ICONSET_DIR="$PROJECT_DIR/build/AppIcon.iconset"
 RESOURCE_BUNDLE_SOURCE="$PROJECT_DIR/.build/release/MoDu_MoDu.bundle"
+PREVIEW_LOCALIZATION_SOURCE="$PROJECT_DIR/Config/Preview"
+CLI_SOURCE="$PROJECT_DIR/Support/CLI/modu"
+CLI_DIR="$CONTENTS_DIR/Resources/CLI"
 LICENSE_DIR="$CONTENTS_DIR/Resources/ThirdPartyLicenses"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(/usr/bin/git -C "$PROJECT_DIR" show -s --format=%ct HEAD)}"
 
@@ -41,12 +65,15 @@ swift test --package-path "$PROJECT_DIR" -Xswiftc -warnings-as-errors
 swift build --package-path "$PROJECT_DIR" -c release -Xswiftc -warnings-as-errors
 verify_source_state
 
-if [[ "$APP_DIR" != "$PROJECT_DIR/build/MoDu.app" ]]; then
+if [[ "$APP_DIR" != "$PREVIEW_APP_DIR" && "$APP_DIR" != "$FORMAL_APP_DIR" ]]; then
   print -u2 "拒绝清理非预期构建目录：$APP_DIR"
   exit 1
 fi
 
 /bin/rm -rf "$APP_DIR"
+if [[ -d "$LEGACY_APP_DIR" ]]; then
+  /bin/rm -rf "$LEGACY_APP_DIR"
+fi
 /bin/mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 /bin/cp "$PROJECT_DIR/.build/release/MoDu" "$CONTENTS_DIR/MacOS/MoDu"
 /bin/cp "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
@@ -63,6 +90,41 @@ for localization in en zh-Hans; do
     "$PROJECT_DIR/Sources/MoDu/Resources/$localization.lproj" \
     "$CONTENTS_DIR/Resources/$localization.lproj"
 done
+if [[ "$BUILD_FLAVOR" == "preview" ]]; then
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName MoDu Preview' "$CONTENTS_DIR/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleName MoDu Preview' "$CONTENTS_DIR/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.local.modu.preview' "$CONTENTS_DIR/Info.plist"
+  for localization in en zh-Hans; do
+    /bin/cp \
+      "$PREVIEW_LOCALIZATION_SOURCE/$localization.lproj/InfoPlist.strings" \
+      "$CONTENTS_DIR/Resources/$localization.lproj/InfoPlist.strings"
+  done
+fi
+
+if [[ ! -f "$CLI_SOURCE" ]]; then
+  print -u2 "缺少命令行启动器：$CLI_SOURCE"
+  exit 1
+fi
+/bin/mkdir -p "$CLI_DIR"
+/bin/cp "$CLI_SOURCE" "$CLI_DIR/modu"
+/bin/chmod 755 "$CLI_DIR/modu"
+/bin/zsh -n "$CLI_DIR/modu"
+
+actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CONTENTS_DIR/Info.plist")"
+actual_english_name="$(
+  /usr/bin/plutil -extract CFBundleDisplayName raw -o - \
+    "$CONTENTS_DIR/Resources/en.lproj/InfoPlist.strings"
+)"
+actual_chinese_name="$(
+  /usr/bin/plutil -extract CFBundleDisplayName raw -o - \
+    "$CONTENTS_DIR/Resources/zh-Hans.lproj/InfoPlist.strings"
+)"
+if [[ "$actual_bundle_identifier" != "$EXPECTED_BUNDLE_IDENTIFIER" ||
+      "$actual_english_name" != "$EXPECTED_ENGLISH_NAME" ||
+      "$actual_chinese_name" != "$EXPECTED_CHINESE_NAME" ]]; then
+  print -u2 "应用构建身份校验失败：$BUILD_FLAVOR"
+  exit 1
+fi
 /usr/bin/printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 
 if [[ ! -f "$ICON_SOURCE" ]]; then

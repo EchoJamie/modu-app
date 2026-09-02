@@ -1,6 +1,32 @@
 "app.name" = "MoDu";
+"common.cancel" = "Cancel";
 "common.ok" = "OK";
 "common.unknownError" = "Unknown error";
+
+"settings.general.title" = "General";
+"settings.language" = "Language";
+"settings.appearance" = "Appearance";
+"language.system" = "Follow System";
+"language.english" = "English";
+"language.simplifiedChinese" = "Simplified Chinese";
+
+"settings.cli.title" = "Command Line Tool";
+"settings.cli.description" = "Install modu at /usr/local/bin/modu, the standard macOS directory for third-party commands.";
+"settings.cli.installed" = "Installed";
+"settings.cli.notInstalled" = "Not installed";
+"settings.cli.install" = "Install";
+"settings.cli.uninstall" = "Uninstall";
+"settings.cli.replace.title" = "Replace Existing modu?";
+"settings.cli.replace.message" = "%@ already contains an item named modu. Replace it with the MoDu command?";
+"settings.cli.replace" = "Replace";
+"settings.cli.error.missingTool" = "The bundled command-line launcher is missing.";
+"settings.cli.error.temporaryApp" = "Move MoDu out of the disk image to a stable location before installing the command-line tool.";
+"settings.cli.error.targetExists" = "/usr/local/bin already contains an item named modu.";
+"settings.cli.error.targetDirectory" = "/usr/local/bin contains a folder named modu, which will not be replaced.";
+"settings.cli.error.installationChanged" = "The modu installation changed before the operation completed.";
+"settings.cli.error.authorizationCancelled" = "Administrator authorization was cancelled.";
+"settings.cli.error.privilegedOperationFailed" = "The authorized system operation failed.";
+"settings.cli.error.operationFailed" = "Command-line tool operation failed: %@";
 
 "command.openFolder" = "Open Folder…";
 "command.openRecent" = "Open Recent";
@@ -9,7 +35,6 @@
 "command.reloadDocumentOutline" = "Reload Current Document and Outline";
 "command.reloadDirectory" = "Reload Directory";
 "command.theme" = "Theme";
-"command.displayMode" = "Appearance";
 "command.openSecondPane" = "Open Second Reading Pane";
 "command.closeActivePane" = "Close Active Reading Pane";
 "command.findInDocument" = "Find in Document";
@@ -55,7 +80,7 @@
 "folderPicker.prompt" = "Open";
 
 "sidebar.loading" = "Loading directory…";
-"sidebar.privacyNote" = "Local files · Remote images on demand";
+"sidebar.tagline" = "Answers live between the lines.";
 "sidebar.operationFailed" = "Operation Failed";
 "sidebar.chooseWorkspace" = "Click to choose a workspace";
 "sidebar.currentWorkspaceSwitch" = "Workspace · Click to switch";
@@ -84,7 +109,6 @@
 "toolbar.reloadHelp" = "Reload the current document and outline";
 "toolbar.openSplitHelp" = "Open a second reading pane (⌘\\)";
 "toolbar.closeSplitHelp" = "Close the active reading pane (⌘\\)";
-"toolbar.displayModeHelp" = "Appearance: %@";
 "toolbar.themeHelp" = "Theme: %@ (applies to the interface and document)";
 
 "fileTree.openOtherPane" = "Open in Other Pane";

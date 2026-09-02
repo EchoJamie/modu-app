@@ -1,6 +1,32 @@
 "app.name" = "墨读";
+"common.cancel" = "取消";
 "common.ok" = "好";
 "common.unknownError" = "未知错误";
+
+"settings.general.title" = "通用";
+"settings.language" = "语言";
+"settings.appearance" = "明暗模式";
+"language.system" = "跟随系统";
+"language.english" = "English";
+"language.simplifiedChinese" = "简体中文";
+
+"settings.cli.title" = "命令行工具";
+"settings.cli.description" = "将 modu 安装到 macOS 第三方命令的标准目录 /usr/local/bin/modu。";
+"settings.cli.installed" = "已安装";
+"settings.cli.notInstalled" = "尚未安装";
+"settings.cli.install" = "安装";
+"settings.cli.uninstall" = "卸载";
+"settings.cli.replace.title" = "替换现有的 modu？";
+"settings.cli.replace.message" = "%@ 中已经存在名为 modu 的项目。是否将它替换为 MoDu 命令？";
+"settings.cli.replace" = "替换";
+"settings.cli.error.missingTool" = "应用内置的命令行启动器不存在。";
+"settings.cli.error.temporaryApp" = "请先将 MoDu 从磁盘映像移动到稳定位置，再安装命令行工具。";
+"settings.cli.error.targetExists" = "/usr/local/bin 中已经存在名为 modu 的项目。";
+"settings.cli.error.targetDirectory" = "/usr/local/bin 中存在名为 modu 的文件夹，MoDu 不会替换它。";
+"settings.cli.error.installationChanged" = "操作完成前，modu 的安装状态发生了变化。";
+"settings.cli.error.authorizationCancelled" = "管理员授权已取消。";
+"settings.cli.error.privilegedOperationFailed" = "已授权的系统操作失败。";
+"settings.cli.error.operationFailed" = "命令行工具操作失败：%@";
 
 "command.openFolder" = "打开目录…";
 "command.openRecent" = "打开最近使用的目录";
@@ -9,7 +35,6 @@
 "command.reloadDocumentOutline" = "重新加载当前文档与大纲";
 "command.reloadDirectory" = "重新加载目录";
 "command.theme" = "主题";
-"command.displayMode" = "显示模式";
 "command.openSecondPane" = "打开第二阅读栏";
 "command.closeActivePane" = "关闭当前阅读栏";
 "command.findInDocument" = "在文档中查找";
@@ -55,7 +80,7 @@
 "folderPicker.prompt" = "打开";
 
 "sidebar.loading" = "正在读取目录…";
-"sidebar.privacyNote" = "本地管理 · 远程图片按需加载";
+"sidebar.tagline" = "字里行间，自有答案";
 "sidebar.operationFailed" = "操作失败";
 "sidebar.chooseWorkspace" = "点击选择工作目录";
 "sidebar.currentWorkspaceSwitch" = "工作目录 · 点击切换";
@@ -84,7 +109,6 @@
 "toolbar.reloadHelp" = "重新加载当前文档与大纲";
 "toolbar.openSplitHelp" = "打开第二阅读栏（⌘\\）";
 "toolbar.closeSplitHelp" = "关闭当前阅读栏（⌘\\）";
-"toolbar.displayModeHelp" = "显示模式：%@";
 "toolbar.themeHelp" = "主题：%@（同时应用于界面与正文）";
 
 "fileTree.openOtherPane" = "在另一栏打开";

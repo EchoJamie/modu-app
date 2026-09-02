@@ -95,6 +95,11 @@ enum SelfCheck {
                     L10n.string(.appName, language: "zh-Hans") == "墨读",
                 "应用名称可按语言显示为 MoDu 或墨读"
             )
+            check(
+                L10n.string(.sidebarTagline, language: "en") == "Answers live between the lines." &&
+                    L10n.string(.sidebarTagline, language: "zh-Hans") == "字里行间，自有答案",
+                "侧栏品牌文案保留中英文对应意境"
+            )
             if
                 let languageIndex = CommandLine.arguments.firstIndex(of: "-AppleLanguages"),
                 CommandLine.arguments.indices.contains(languageIndex + 1)

@@ -1,9 +1,11 @@
 import AppKit
+import Combine
 import Darwin
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var webViewSelfCheck: WebViewSelfCheck?
+    @Published private(set) var workspaceOpenRequest: WorkspaceOpenRequest?
 
     #if DEBUG
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -25,6 +27,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let request = WorkspaceOpenRequest.resolve(urls: urls) else { return }
+        workspaceOpenRequest = request
+        application.activate(ignoringOtherApps: true)
+    }
+
+    func consumeWorkspaceOpenRequest(id: UUID) {
+        guard workspaceOpenRequest?.id == id else { return }
+        workspaceOpenRequest = nil
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
@@ -39,6 +52,7 @@ struct MoDuApp: App {
         WindowGroup(L10n.string(.appName)) {
             RootView()
                 .environmentObject(model)
+                .environmentObject(appDelegate)
                 .preferredColorScheme(model.appAppearance.preferredColorScheme)
                 .frame(minWidth: 1160, minHeight: 620)
         }
@@ -103,12 +117,6 @@ struct MoDuApp: App {
                     }
                 }
 
-                Menu(L10n.string(.commandDisplayMode)) {
-                    ForEach(AppAppearance.allCases) { appearance in
-                        Toggle(appearance.name, isOn: appearanceSelection(appearance))
-                    }
-                }
-
                 Divider()
 
                 Button(L10n.string(model.hasSecondPane
@@ -126,16 +134,12 @@ struct MoDuApp: App {
                 .keyboardShortcut("0", modifiers: [.command, .option])
             }
         }
-    }
 
-    private func appearanceSelection(_ appearance: AppAppearance) -> Binding<Bool> {
-        Binding(
-            get: { model.appAppearance == appearance },
-            set: { isSelected in
-                guard isSelected else { return }
-                model.selectAppAppearance(appearance)
-            }
-        )
+        Settings {
+            SettingsView()
+                .environmentObject(model)
+                .preferredColorScheme(model.appAppearance.preferredColorScheme)
+        }
     }
 
     private func themeSelection(_ style: MarkdownStyle) -> Binding<Bool> {

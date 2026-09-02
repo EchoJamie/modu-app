@@ -1,7 +1,9 @@
+import Combine
 import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: ReaderViewModel
+    @EnvironmentObject private var appDelegate: AppDelegate
     @Environment(\.colorScheme) private var colorScheme
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var outlinePanelWidth = OutlinePanelLayout.restoredWidth()
@@ -66,7 +68,6 @@ struct RootView: View {
                         : .commandOpenSecondPane))
 
                     themeMenu
-                    displayModeMenu
 
                     Button {
                         model.outlineIsVisible.toggle()
@@ -83,6 +84,10 @@ struct RootView: View {
             .onAppear {
                 model.updateSystemColorScheme(colorScheme)
                 model.openDebugArgumentsIfNeeded()
+            }
+            .onReceive(appDelegate.$workspaceOpenRequest.compactMap { $0 }) { request in
+                model.openWorkspace(request)
+                appDelegate.consumeWorkspaceOpenRequest(id: request.id)
             }
             .onChange(of: colorScheme) { newColorScheme in
                 model.updateSystemColorScheme(newColorScheme)
@@ -115,23 +120,6 @@ struct RootView: View {
         )
     }
 
-    private var displayModeMenu: some View {
-        Menu {
-            ForEach(AppAppearance.allCases) { appearance in
-                Toggle(isOn: appearanceSelection(appearance)) {
-                    Label(
-                        appearance.name,
-                        systemImage: appearance.symbol
-                    )
-                }
-            }
-        } label: {
-            Image(systemName: model.appAppearance.symbol)
-        }
-        .focusable(false)
-        .help(L10n.format(.toolbarDisplayModeHelp, model.appAppearance.name))
-    }
-
     private var themeMenu: some View {
         Menu {
             ForEach(MarkdownStyle.allCases) { style in
@@ -151,16 +139,6 @@ struct RootView: View {
         }
         .focusable(false)
         .help(L10n.format(.toolbarThemeHelp, model.markdownStyle.name))
-    }
-
-    private func appearanceSelection(_ appearance: AppAppearance) -> Binding<Bool> {
-        Binding(
-            get: { model.appAppearance == appearance },
-            set: { isSelected in
-                guard isSelected else { return }
-                model.selectAppAppearance(appearance)
-            }
-        )
     }
 
     private func themeSelection(_ style: MarkdownStyle) -> Binding<Bool> {

@@ -1,0 +1,53 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+APP_BUNDLE="${SCRIPT_DIR:h:h:h}"
+INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
+
+usage() {
+  print 'Usage: modu <directory-or-file>'
+  print '       modu --help'
+  print '       modu --version'
+}
+
+if (( $# != 1 )); then
+  usage >&2
+  exit 2
+fi
+
+case "$1" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  --version)
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
+    build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
+    print "modu $version ($build)"
+    exit 0
+    ;;
+  -*)
+    print -u2 "modu: unknown option: $1"
+    usage >&2
+    exit 2
+    ;;
+esac
+
+target="$1"
+if [[ ! -e "$target" ]]; then
+  print -u2 "modu: path does not exist: $target"
+  exit 1
+fi
+
+resolved_target="${target:A}"
+if [[ -d "$resolved_target" ]]; then
+  open_targets=("$resolved_target")
+elif [[ -f "$resolved_target" ]]; then
+  open_targets=("${resolved_target:h}" "$resolved_target")
+else
+  print -u2 "modu: path is not a regular file or directory: $target"
+  exit 1
+fi
+
+/usr/bin/open -a "$APP_BUNDLE" "${open_targets[@]}"

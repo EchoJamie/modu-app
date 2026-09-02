@@ -40,9 +40,9 @@ struct SidebarView: View {
                 .overlay(theme.divider.opacity(0.75))
 
             HStack(spacing: 7) {
-                Image(systemName: "photo.on.rectangle.angled")
+                Image(systemName: "text.quote")
                     .font(.system(size: 11))
-                Text(L10n.string(.sidebarPrivacyNote))
+                Text(L10n.string(.sidebarTagline))
                     .font(.system(size: 11, weight: .medium))
                 Spacer()
             }
