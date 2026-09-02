@@ -14,18 +14,15 @@
 "settings.cli.description" = "Install modu at /usr/local/bin/modu, the standard macOS directory for third-party commands.";
 "settings.cli.installed" = "Installed";
 "settings.cli.notInstalled" = "Not installed";
+"settings.cli.authorizing" = "Waiting for system authorization…";
 "settings.cli.install" = "Install";
 "settings.cli.uninstall" = "Uninstall";
-"settings.cli.replace.title" = "Replace Existing modu?";
-"settings.cli.replace.message" = "%@ already contains an item named modu. Replace it with the MoDu command?";
-"settings.cli.replace" = "Replace";
 "settings.cli.error.missingTool" = "The bundled command-line launcher is missing.";
+"settings.cli.error.missingInstaller" = "The bundled authorization helper is missing.";
 "settings.cli.error.temporaryApp" = "Move MoDu out of the disk image to a stable location before installing the command-line tool.";
-"settings.cli.error.targetExists" = "/usr/local/bin already contains an item named modu.";
 "settings.cli.error.targetDirectory" = "/usr/local/bin contains a folder named modu, which will not be replaced.";
 "settings.cli.error.installationChanged" = "The modu installation changed before the operation completed.";
-"settings.cli.error.authorizationCancelled" = "Administrator authorization was cancelled.";
-"settings.cli.error.privilegedOperationFailed" = "The authorized system operation failed.";
+"settings.cli.error.helperLaunchFailed" = "The system could not open the authorization helper: %@";
 "settings.cli.error.operationFailed" = "Command-line tool operation failed: %@";
 
 "command.openFolder" = "Open Folder…";

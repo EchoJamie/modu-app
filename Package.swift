@@ -31,9 +31,16 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         ),
+        .executableTarget(
+            name: "MoDuCLIInstaller",
+            path: "Sources/MoDuCLIInstaller",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
         .testTarget(
             name: "MoDuTests",
-            dependencies: ["MoDu"],
+            dependencies: ["MoDu", "MoDuCLIInstaller"],
             path: "Tests/MoDuTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)

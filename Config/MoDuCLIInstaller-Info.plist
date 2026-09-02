@@ -7,33 +7,31 @@
     <key>CFBundleDisplayName</key>
     <string>MoDu</string>
     <key>CFBundleExecutable</key>
-    <string>MoDu</string>
+    <string>MoDuCLIInstaller</string>
     <key>CFBundleIdentifier</key>
-    <string>com.local.modu</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>com.local.modu.cli-installer</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+    </array>
     <key>CFBundleName</key>
-    <string>MoDu</string>
+    <string>MoDu CLI Installer</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>0.8.1</string>
     <key>CFBundleVersion</key>
     <string>22</string>
-    <key>CFBundleLocalizations</key>
-    <array>
-        <string>en</string>
-        <string>zh-Hans</string>
-    </array>
-    <key>LSHasLocalizedDisplayName</key>
-    <true/>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>MoDuCLIInstallerOperation</key>
+    <string>install</string>
     <key>NSHighResolutionCapable</key>
     <true/>
-    <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026</string>
 </dict>
 </plist>

@@ -32,6 +32,9 @@ RESOURCE_BUNDLE_SOURCE="$PROJECT_DIR/.build/release/MoDu_MoDu.bundle"
 PREVIEW_LOCALIZATION_SOURCE="$PROJECT_DIR/Config/Preview"
 CLI_SOURCE="$PROJECT_DIR/Support/CLI/modu"
 CLI_DIR="$CONTENTS_DIR/Resources/CLI"
+CLI_INSTALLER_SOURCE="$PROJECT_DIR/.build/release/MoDuCLIInstaller"
+CLI_INSTALLER_INFO="$PROJECT_DIR/Config/MoDuCLIInstaller-Info.plist"
+CLI_INSTALLER_HELPERS_DIR="$CONTENTS_DIR/Helpers"
 LICENSE_DIR="$CONTENTS_DIR/Resources/ThirdPartyLicenses"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(/usr/bin/git -C "$PROJECT_DIR" show -s --format=%ct HEAD)}"
 
@@ -110,6 +113,76 @@ fi
 /bin/chmod 755 "$CLI_DIR/modu"
 /bin/zsh -n "$CLI_DIR/modu"
 
+if [[ ! -x "$CLI_INSTALLER_SOURCE" || ! -f "$CLI_INSTALLER_INFO" ]]; then
+  print -u2 "缺少命令行工具系统授权助手。"
+  exit 1
+fi
+
+package_cli_installer() {
+  local operation="$1"
+  local bundle_name="$2"
+  local identifier_suffix="$3"
+  local helper_app="$CLI_INSTALLER_HELPERS_DIR/$bundle_name"
+  local helper_contents="$helper_app/Contents"
+
+  /bin/mkdir -p \
+    "$helper_contents/MacOS" \
+    "$helper_contents/Resources/en.lproj" \
+    "$helper_contents/Resources/zh-Hans.lproj"
+  /bin/cp "$CLI_INSTALLER_SOURCE" "$helper_contents/MacOS/MoDuCLIInstaller"
+  /bin/chmod 755 "$helper_contents/MacOS/MoDuCLIInstaller"
+  /bin/cp "$CLI_INSTALLER_INFO" "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleIdentifier $EXPECTED_BUNDLE_IDENTIFIER.$identifier_suffix" \
+    "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleDisplayName $EXPECTED_ENGLISH_NAME" \
+    "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleName $EXPECTED_ENGLISH_NAME" \
+    "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$CONTENTS_DIR/Info.plist")" \
+    "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleVersion $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$CONTENTS_DIR/Info.plist")" \
+    "$helper_contents/Info.plist"
+  /usr/libexec/PlistBuddy \
+    -c "Set :MoDuCLIInstallerOperation $operation" \
+    "$helper_contents/Info.plist"
+  local actual_helper_identifier
+  local actual_helper_operation
+  actual_helper_identifier="$(
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$helper_contents/Info.plist"
+  )"
+  actual_helper_operation="$(
+    /usr/libexec/PlistBuddy -c 'Print :MoDuCLIInstallerOperation' "$helper_contents/Info.plist"
+  )"
+  if [[ "$actual_helper_identifier" != "$EXPECTED_BUNDLE_IDENTIFIER.$identifier_suffix" ||
+        "$actual_helper_operation" != "$operation" ]]; then
+    print -u2 "系统授权助手职责校验失败：$bundle_name"
+    exit 1
+  fi
+  for localization in en zh-Hans; do
+    /bin/cp \
+      "$CONTENTS_DIR/Resources/$localization.lproj/InfoPlist.strings" \
+      "$helper_contents/Resources/$localization.lproj/InfoPlist.strings"
+  done
+  /usr/bin/printf 'APPL????' > "$helper_contents/PkgInfo"
+
+  /usr/bin/codesign --force --sign - "$helper_app"
+  local helper_entitlements
+  helper_entitlements="$(/usr/bin/codesign -d --entitlements - "$helper_app" 2>/dev/null || true)"
+  if [[ "$helper_entitlements" == *"com.apple.security.app-sandbox"* ]]; then
+    print -u2 "系统授权助手不得继承应用沙盒：$bundle_name"
+    exit 1
+  fi
+  /usr/bin/codesign --verify --strict "$helper_app"
+}
+
+package_cli_installer install "MoDuCLIInstall.app" "cli-install"
+package_cli_installer uninstall "MoDuCLIUninstall.app" "cli-uninstall"
+
 actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CONTENTS_DIR/Info.plist")"
 actual_english_name="$(
   /usr/bin/plutil -extract CFBundleDisplayName raw -o - \
@@ -148,6 +221,12 @@ done
   --sign - \
   --entitlements "$PROJECT_DIR/Config/MoDu.entitlements" \
   "$APP_DIR"
+/usr/bin/codesign --verify --deep --strict "$APP_DIR"
+main_entitlements="$(/usr/bin/codesign -d --entitlements - "$APP_DIR" 2>/dev/null || true)"
+if [[ "$main_entitlements" != *"com.apple.security.app-sandbox"* ]]; then
+  print -u2 "主应用缺少预期的沙盒权限。"
+  exit 1
+fi
 
 "$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(en)' --webview-self-check
 "$CONTENTS_DIR/MacOS/MoDu" -AppleLanguages '(zh-Hans)' --webview-self-check

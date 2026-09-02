@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import MoDu
+@testable import MoDuCLIInstaller
 
 @Suite("Document governance")
 struct DocumentGovernanceTests {
@@ -9,6 +10,28 @@ struct DocumentGovernanceTests {
     @MainActor
     func completeSelfCheck() {
         #expect(SelfCheck.run() == 0)
+    }
+
+    @Test("Settings window does not retain an implicit action-button focus")
+    @MainActor
+    func settingsWindowInitialFocus() {
+        let button = NSButton(title: "Install", target: nil, action: nil)
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        contentView.addSubview(button)
+        let window = NSWindow(
+            contentRect: contentView.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = contentView
+        window.initialFirstResponder = button
+
+        #expect(window.makeFirstResponder(button))
+        #expect(window.firstResponder === button)
+        #expect(SettingsWindowFocusPolicy.clearInitialFocus(in: window))
+        #expect(window.initialFirstResponder == nil)
+        #expect(window.firstResponder === window)
     }
 
     @Test("Preview classification is pure and requires regular-file metadata")
@@ -195,6 +218,22 @@ struct DocumentGovernanceTests {
     func commandLineToolInstallation() throws {
         try withTemporaryRoot { root in
             #expect(CommandLineToolInstaller.systemInstallationURL.path == "/usr/local/bin/modu")
+            #expect(
+                CLIInstallerCommand.authorizationPrompt(for: .install, isChinese: false)
+                    == "Administrator permission is required to install the modu command at /usr/local/bin."
+            )
+            #expect(
+                CLIInstallerCommand.authorizationPrompt(for: .replace, isChinese: true)
+                    == "将 modu 命令安装到 /usr/local/bin 需要管理员权限。"
+            )
+            #expect(
+                CLIInstallerCommand.authorizationPrompt(for: .uninstall, isChinese: false)
+                    == "Administrator permission is required to remove the modu command from /usr/local/bin."
+            )
+            #expect(
+                CLIInstallerCommand.authorizationPrompt(for: .uninstall, isChinese: true)
+                    == "从 /usr/local/bin 卸载 modu 命令需要管理员权限。"
+            )
 
             let appURL = root
                 .appendingPathComponent("Applications", isDirectory: true)
@@ -218,26 +257,42 @@ struct DocumentGovernanceTests {
             )
 
             let targetURL = installationDirectory.appendingPathComponent("modu")
-            let performOperation: (CommandLineToolOperation) throws -> Void = { operation in
+            let performOperation: CommandLineToolOperationPerformer = { operation, completion in
+                let helperOperation: CLIInstallerOperation
+                switch operation {
+                case .install:
+                    let targetExists = FileManager.default.fileExists(atPath: targetURL.path)
+                        || (try? FileManager.default.destinationOfSymbolicLink(
+                            atPath: targetURL.path
+                        )) != nil
+                    helperOperation = targetExists ? .replace : .install
+                case .uninstall:
+                    helperOperation = .uninstall
+                }
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
                 process.arguments = [
                     "-c",
-                    CommandLineToolInstaller.privilegedShellCommand(for: operation)
+                    CLIInstallerCommand.privilegedShellCommand(
+                        for: helperOperation,
+                        sourceURL: launcherURL,
+                        targetURL: targetURL
+                    )
                 ]
                 try process.run()
                 process.waitUntilExit()
                 guard process.terminationStatus == 0 else {
-                    throw CommandLineToolInstallerError.privilegedOperation(
+                    throw CommandLineToolInstallerError.helperLaunchFailed(
                         "Shell exited with \(process.terminationStatus)"
                     )
                 }
+                completion(.success(()))
             }
             let installer = CommandLineToolInstaller(
                 applicationURL: appURL,
                 bundledToolURL: launcherURL,
                 installationURL: targetURL,
-                performPrivilegedOperation: performOperation
+                performOperation: performOperation
             )
 
             try installer.install()
@@ -251,16 +306,13 @@ struct DocumentGovernanceTests {
                 applicationURL: appURL,
                 bundledToolURL: launcherURL,
                 installationURL: targetURL,
-                performPrivilegedOperation: performOperation
+                performOperation: performOperation
             )
             #expect(restoredInstaller.installedURL == targetURL.standardizedFileURL)
 
             try FileManager.default.removeItem(at: targetURL)
             try "existing\n".write(to: targetURL, atomically: true, encoding: .utf8)
-            #expect(throws: CommandLineToolInstallerError.targetExists) {
-                try installer.install()
-            }
-            try installer.install(replacingExisting: true)
+            try installer.install()
             #expect(
                 try FileManager.default.destinationOfSymbolicLink(atPath: targetURL.path)
                     == launcherURL.path
@@ -272,7 +324,7 @@ struct DocumentGovernanceTests {
 
             try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: false)
             #expect(throws: CommandLineToolInstallerError.targetIsDirectory) {
-                try installer.install(replacingExisting: true)
+                try installer.install()
             }
         }
     }

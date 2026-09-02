@@ -4,37 +4,49 @@ import Foundation
 
 enum CommandLineToolInstallerError: LocalizedError, Equatable {
     case bundledToolMissing
+    case bundledInstallerMissing
     case temporaryApplicationLocation
-    case targetExists
     case targetIsDirectory
     case installationChanged
-    case authorizationCancelled
-    case privilegedOperation(String)
+    case helperLaunchFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .bundledToolMissing:
             L10n.string(.settingsCLIMissingTool)
+        case .bundledInstallerMissing:
+            L10n.string(.settingsCLIMissingInstaller)
         case .temporaryApplicationLocation:
             L10n.string(.settingsCLITemporaryApp)
-        case .targetExists:
-            L10n.string(.settingsCLITargetExists)
         case .targetIsDirectory:
             L10n.string(.settingsCLITargetDirectory)
         case .installationChanged:
             L10n.string(.settingsCLIInstallationChanged)
-        case .authorizationCancelled:
-            L10n.string(.settingsCLIAuthorizationCancelled)
-        case .privilegedOperation(let message):
-            message
+        case .helperLaunchFailed(let message):
+            L10n.format(.settingsCLIHelperLaunchFailed, message)
         }
     }
 }
 
 enum CommandLineToolOperation: Equatable {
-    case install(sourceURL: URL, targetURL: URL, replacingExisting: Bool)
-    case uninstall(sourceURL: URL, targetURL: URL)
+    case install
+    case uninstall
+
+    var helperBundleName: String {
+        switch self {
+        case .install:
+            "MoDuCLIInstall.app"
+        case .uninstall:
+            "MoDuCLIUninstall.app"
+        }
+    }
 }
+
+typealias CommandLineToolOperationCompletion = @MainActor (Result<Void, Error>) -> Void
+typealias CommandLineToolOperationPerformer = (
+    CommandLineToolOperation,
+    @escaping CommandLineToolOperationCompletion
+) throws -> Void
 
 @MainActor
 final class CommandLineToolInstaller: ObservableObject {
@@ -44,19 +56,20 @@ final class CommandLineToolInstaller: ObservableObject {
 
     @Published private(set) var installedURL: URL?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var isPerformingOperation = false
 
     private let fileManager: FileManager
     private let bundledToolURL: URL
     private let applicationURL: URL
     private let installationURL: URL
-    private let performPrivilegedOperation: (CommandLineToolOperation) throws -> Void
+    private let performOperation: CommandLineToolOperationPerformer
 
     init(
         fileManager: FileManager = .default,
         applicationURL: URL = Bundle.main.bundleURL,
         bundledToolURL: URL? = nil,
         installationURL: URL = CommandLineToolInstaller.systemInstallationURL,
-        performPrivilegedOperation: ((CommandLineToolOperation) throws -> Void)? = nil
+        performOperation: CommandLineToolOperationPerformer? = nil
     ) {
         self.fileManager = fileManager
         self.applicationURL = applicationURL.standardizedFileURL
@@ -69,8 +82,24 @@ final class CommandLineToolInstaller: ObservableObject {
                     .appendingPathComponent("modu")
         ).standardizedFileURL
         self.installationURL = installationURL.standardizedFileURL
-        self.performPrivilegedOperation = performPrivilegedOperation
-            ?? Self.executeWithAdministratorPrivileges
+
+        if let performOperation {
+            self.performOperation = performOperation
+        } else {
+            let helpersURL = applicationURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Helpers", isDirectory: true)
+                .standardizedFileURL
+            self.performOperation = { operation, completion in
+                try Self.launchInstallerHelper(
+                    at: helpersURL.appendingPathComponent(
+                        operation.helperBundleName,
+                        isDirectory: true
+                    ),
+                    completion: completion
+                )
+            }
+        }
         refreshInstallationStatus()
     }
 
@@ -80,17 +109,6 @@ final class CommandLineToolInstaller: ObservableObject {
         errorMessage = nil
         do {
             try install()
-        } catch CommandLineToolInstallerError.targetExists {
-            guard confirmReplacement() else { return }
-            do {
-                try install(replacingExisting: true)
-            } catch CommandLineToolInstallerError.authorizationCancelled {
-                return
-            } catch {
-                report(error)
-            }
-        } catch CommandLineToolInstallerError.authorizationCancelled {
-            return
         } catch {
             report(error)
         }
@@ -100,14 +118,13 @@ final class CommandLineToolInstaller: ObservableObject {
         errorMessage = nil
         do {
             try uninstall()
-        } catch CommandLineToolInstallerError.authorizationCancelled {
-            return
         } catch {
             report(error)
         }
     }
 
-    func install(replacingExisting: Bool = false) throws {
+    func install() throws {
+        guard !isPerformingOperation else { return }
         guard isStableApplicationLocation else {
             throw CommandLineToolInstallerError.temporaryApplicationLocation
         }
@@ -129,38 +146,18 @@ final class CommandLineToolInstaller: ObservableObject {
             if !isSymbolicLink(at: installationURL), isDirectory.boolValue {
                 throw CommandLineToolInstallerError.targetIsDirectory
             }
-            guard replacingExisting else {
-                throw CommandLineToolInstallerError.targetExists
-            }
         }
 
-        try performPrivilegedOperation(
-            .install(
-                sourceURL: bundledToolURL,
-                targetURL: installationURL,
-                replacingExisting: replacingExisting
-            )
-        )
-        guard isCurrentInstallation else {
-            throw CommandLineToolInstallerError.installationChanged
-        }
-        installedURL = installationURL
-        errorMessage = nil
+        try begin(.install)
     }
 
     func uninstall() throws {
+        guard !isPerformingOperation else { return }
         guard isCurrentInstallation else {
             refreshInstallationStatus()
             throw CommandLineToolInstallerError.installationChanged
         }
-        try performPrivilegedOperation(
-            .uninstall(sourceURL: bundledToolURL, targetURL: installationURL)
-        )
-        guard !itemExistsIncludingSymbolicLink(at: installationURL) else {
-            throw CommandLineToolInstallerError.installationChanged
-        }
-        installedURL = nil
-        errorMessage = nil
+        try begin(.uninstall)
     }
 
     func refreshInstallationStatus() {
@@ -195,17 +192,24 @@ final class CommandLineToolInstaller: ObservableObject {
         (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil
     }
 
-    private func confirmReplacement() -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = L10n.string(.settingsCLIReplaceTitle)
-        alert.informativeText = L10n.format(
-            .settingsCLIReplaceMessage,
-            installationURL.path
-        )
-        alert.addButton(withTitle: L10n.string(.settingsCLIReplace))
-        alert.addButton(withTitle: L10n.string(.commonCancel))
-        return alert.runModal() == .alertFirstButtonReturn
+    private func begin(_ operation: CommandLineToolOperation) throws {
+        isPerformingOperation = true
+        do {
+            try performOperation(operation) { [weak self] result in
+                guard let self else { return }
+                self.isPerformingOperation = false
+                self.refreshInstallationStatus()
+                switch result {
+                case .success:
+                    self.errorMessage = nil
+                case .failure(let error):
+                    self.report(error)
+                }
+            }
+        } catch {
+            isPerformingOperation = false
+            throw error
+        }
     }
 
     private func report(_ error: Error) {
@@ -213,100 +217,53 @@ final class CommandLineToolInstaller: ObservableObject {
         refreshInstallationStatus()
     }
 
-    private static func executeWithAdministratorPrivileges(
-        _ operation: CommandLineToolOperation
+    private static func launchInstallerHelper(
+        at helperURL: URL,
+        completion: @escaping CommandLineToolOperationCompletion
     ) throws {
-        let shellCommand = privilegedShellCommand(for: operation)
-        let appleScriptSource = "do shell script \"\(appleScriptLiteral(shellCommand))\" "
-            + "with administrator privileges"
-        guard let script = NSAppleScript(source: appleScriptSource) else {
-            throw CommandLineToolInstallerError.privilegedOperation(
-                L10n.string(.settingsCLIPrivilegedOperationFailed)
-            )
+        let executableURL = helperURL
+            .appendingPathComponent("Contents/MacOS", isDirectory: true)
+            .appendingPathComponent("MoDuCLIInstaller")
+        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
+            throw CommandLineToolInstallerError.bundledInstallerMissing
         }
 
-        var errorInfo: NSDictionary?
-        _ = script.executeAndReturnError(&errorInfo)
-        if let errorInfo {
-            let number = errorInfo[NSAppleScript.errorNumber] as? Int
-            if number == -128 {
-                throw CommandLineToolInstallerError.authorizationCancelled
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = true
+        configuration.allowsRunningApplicationSubstitution = false
+
+        NSWorkspace.shared.openApplication(
+            at: helperURL,
+            configuration: configuration
+        ) { runningApplication, error in
+            Task { @MainActor in
+                if let error {
+                    completion(
+                        .failure(
+                            CommandLineToolInstallerError.helperLaunchFailed(
+                                error.localizedDescription
+                            )
+                        )
+                    )
+                    return
+                }
+                guard let runningApplication else {
+                    completion(
+                        .failure(
+                            CommandLineToolInstallerError.helperLaunchFailed(
+                                L10n.string(.commonUnknownError)
+                            )
+                        )
+                    )
+                    return
+                }
+
+                while !runningApplication.isTerminated {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                completion(.success(()))
             }
-            let message = errorInfo[NSAppleScript.errorMessage] as? String
-                ?? L10n.string(.settingsCLIPrivilegedOperationFailed)
-            throw CommandLineToolInstallerError.privilegedOperation(message)
         }
-    }
-
-    nonisolated static func privilegedShellCommand(
-        for operation: CommandLineToolOperation
-    ) -> String {
-        let sourceURL: URL
-        let targetURL: URL
-        let replacingExisting: Bool
-        let isUninstall: Bool
-        switch operation {
-        case .install(let source, let target, let replacing):
-            sourceURL = source
-            targetURL = target
-            replacingExisting = replacing
-            isUninstall = false
-        case .uninstall(let source, let target):
-            sourceURL = source
-            targetURL = target
-            replacingExisting = false
-            isUninstall = true
-        }
-
-        let source = encodedPath(sourceURL)
-        let target = encodedPath(targetURL)
-        let directory = encodedPath(targetURL.deletingLastPathComponent())
-        var commands = [
-            "set -eu",
-            "source_path=$(/usr/bin/printf %s \(source) | /usr/bin/base64 -D)",
-            "target_path=$(/usr/bin/printf %s \(target) | /usr/bin/base64 -D)",
-            "directory_path=$(/usr/bin/printf %s \(directory) | /usr/bin/base64 -D)",
-            "[ -x \"$source_path\" ] || exit 76"
-        ]
-
-        if isUninstall {
-            commands.append(
-                "if [ ! -L \"$target_path\" ]; then exit 74; fi"
-            )
-            commands.append(
-                "if [ \"$(/usr/bin/readlink \"$target_path\")\" != \"$source_path\" ]; "
-                    + "then exit 74; fi"
-            )
-            commands.append("/bin/rm -f \"$target_path\"")
-        } else {
-            commands.append("/bin/mkdir -p \"$directory_path\"")
-            commands.append(
-                "if [ -d \"$target_path\" ] && [ ! -L \"$target_path\" ]; "
-                    + "then exit 73; fi"
-            )
-            if replacingExisting {
-                commands.append(
-                    "if [ -e \"$target_path\" ] || [ -L \"$target_path\" ]; "
-                        + "then /bin/rm -f \"$target_path\"; fi"
-                )
-            } else {
-                commands.append(
-                    "if [ -e \"$target_path\" ] || [ -L \"$target_path\" ]; "
-                        + "then exit 75; fi"
-                )
-            }
-            commands.append("/bin/ln -s \"$source_path\" \"$target_path\"")
-        }
-        return commands.joined(separator: "; ")
-    }
-
-    nonisolated private static func encodedPath(_ url: URL) -> String {
-        Data(url.standardizedFileURL.path.utf8).base64EncodedString()
-    }
-
-    private static func appleScriptLiteral(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

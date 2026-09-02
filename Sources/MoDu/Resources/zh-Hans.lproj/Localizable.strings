@@ -14,18 +14,15 @@
 "settings.cli.description" = "将 modu 安装到 macOS 第三方命令的标准目录 /usr/local/bin/modu。";
 "settings.cli.installed" = "已安装";
 "settings.cli.notInstalled" = "尚未安装";
+"settings.cli.authorizing" = "正在等待系统授权…";
 "settings.cli.install" = "安装";
 "settings.cli.uninstall" = "卸载";
-"settings.cli.replace.title" = "替换现有的 modu？";
-"settings.cli.replace.message" = "%@ 中已经存在名为 modu 的项目。是否将它替换为 MoDu 命令？";
-"settings.cli.replace" = "替换";
 "settings.cli.error.missingTool" = "应用内置的命令行启动器不存在。";
+"settings.cli.error.missingInstaller" = "应用内置的系统授权助手不存在。";
 "settings.cli.error.temporaryApp" = "请先将 MoDu 从磁盘映像移动到稳定位置，再安装命令行工具。";
-"settings.cli.error.targetExists" = "/usr/local/bin 中已经存在名为 modu 的项目。";
 "settings.cli.error.targetDirectory" = "/usr/local/bin 中存在名为 modu 的文件夹，MoDu 不会替换它。";
 "settings.cli.error.installationChanged" = "操作完成前，modu 的安装状态发生了变化。";
-"settings.cli.error.authorizationCancelled" = "管理员授权已取消。";
-"settings.cli.error.privilegedOperationFailed" = "已授权的系统操作失败。";
+"settings.cli.error.helperLaunchFailed" = "系统无法打开授权助手：%@";
 "settings.cli.error.operationFailed" = "命令行工具操作失败：%@";
 
 "command.openFolder" = "打开目录…";
