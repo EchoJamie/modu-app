@@ -594,7 +594,7 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
     }
 }
 
-private final class FileTreeFocusView: NSView {
+final class FileTreeFocusView: NSView {
     var onFocusChanged: ((Bool) -> Void)?
     var onKeyEvent: ((NSEvent) -> Bool)?
 
@@ -617,6 +617,9 @@ private final class FileTreeFocusView: NSView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self else {
+            return super.performKeyEquivalent(with: event)
+        }
         if onKeyEvent?(event) == true { return true }
         return super.performKeyEquivalent(with: event)
     }

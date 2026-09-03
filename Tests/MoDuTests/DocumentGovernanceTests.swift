@@ -34,6 +34,55 @@ struct DocumentGovernanceTests {
         #expect(window.firstResponder === window)
     }
 
+    @Test("File-tree shortcuts only run while the file tree owns keyboard focus")
+    @MainActor
+    func fileTreeShortcutFocusOwnership() throws {
+        _ = NSApplication.shared
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let fileTreeFocusView = FileTreeFocusView(
+            frame: NSRect(x: 0, y: 0, width: 100, height: 200)
+        )
+        let documentTextView = NSTextView(
+            frame: NSRect(x: 100, y: 0, width: 200, height: 200)
+        )
+        contentView.addSubview(fileTreeFocusView)
+        contentView.addSubview(documentTextView)
+
+        let window = NSWindow(
+            contentRect: contentView.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = contentView
+
+        var routedShortcutCount = 0
+        fileTreeFocusView.onKeyEvent = { _ in
+            routedShortcutCount += 1
+            return true
+        }
+        let copyEvent = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "c",
+            charactersIgnoringModifiers: "c",
+            isARepeat: false,
+            keyCode: 8
+        ))
+
+        #expect(window.makeFirstResponder(documentTextView))
+        #expect(!fileTreeFocusView.performKeyEquivalent(with: copyEvent))
+        #expect(routedShortcutCount == 0)
+
+        #expect(window.makeFirstResponder(fileTreeFocusView))
+        #expect(fileTreeFocusView.performKeyEquivalent(with: copyEvent))
+        #expect(routedShortcutCount == 1)
+    }
+
     @Test("Reader windows isolate documents and outlines while sharing preferences")
     @MainActor
     func readerWindowStateIsolation() throws {
