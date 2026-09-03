@@ -12,6 +12,17 @@ struct RecentWorkspace: Identifiable, Equatable {
     var displayPath: String { url.path }
 }
 
+enum FileTreeSelectionTarget: Equatable {
+    case none
+    case firstRootNode
+    case url(URL)
+}
+
+struct FileTreeSelectionRequest: Equatable {
+    let id = UUID()
+    let target: FileTreeSelectionTarget
+}
+
 enum ReaderPaneID: String, Hashable, Sendable {
     case primary
     case reference
@@ -103,6 +114,7 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var rootURL: URL?
     @Published private(set) var rootNodes: [FileNode] = []
     @Published private(set) var rootIsLoading = false
+    @Published private(set) var fileTreeSelectionRequest: FileTreeSelectionRequest?
 
     @Published private var paneStates: [ReaderPaneID: ReaderPaneState] = [
         .primary: ReaderPaneState()
@@ -118,6 +130,7 @@ final class ReaderViewModel: ObservableObject {
     private var rootTask: Task<Void, Never>?
     private var workspaceGeneration = UUID()
     private var treeGeneration = UUID()
+    private var pendingFileTreeSelectionTarget: FileTreeSelectionTarget?
     private var sourceLanguageOverrides: [String: SourceLanguage] = [:]
     private let documentLoadCompletionBarrier: (@Sendable (URL, UUID) async -> Void)?
     private var debugArgumentsHandled = false
@@ -293,7 +306,11 @@ final class ReaderViewModel: ObservableObject {
             arguments.indices.contains(anchorIndex + 1) ? arguments[anchorIndex + 1] : nil
         }
         debugLineJumpRequested = arguments.contains("--show-line-jump")
-        openWorkspace(fileURL.deletingLastPathComponent())
+        openWorkspace(
+            fileURL.deletingLastPathComponent(),
+            bookmarkData: nil,
+            fileTreeSelectionTarget: .url(fileURL)
+        )
         loadDocument(at: fileURL, anchor: anchor, in: .primary)
 
         if
@@ -313,17 +330,26 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func openWorkspace(_ url: URL) {
-        openWorkspace(url, bookmarkData: nil)
+        openWorkspace(url, bookmarkData: nil, fileTreeSelectionTarget: .firstRootNode)
     }
 
     func openWorkspace(_ request: WorkspaceOpenRequest) {
-        openWorkspace(request.workspaceURL)
+        openWorkspace(
+            request.workspaceURL,
+            bookmarkData: nil,
+            fileTreeSelectionTarget: request.documentURL.map(FileTreeSelectionTarget.url)
+                ?? .firstRootNode
+        )
         if let documentURL = request.documentURL {
             loadDocument(at: documentURL, in: .primary)
         }
     }
 
-    private func openWorkspace(_ url: URL, bookmarkData: Data?) {
+    private func openWorkspace(
+        _ url: URL,
+        bookmarkData: Data?,
+        fileTreeSelectionTarget: FileTreeSelectionTarget
+    ) {
         rootTask?.cancel()
         for pane in Array(paneStates.keys) {
             updatePane(pane) { $0.cancelAllTasks() }
@@ -339,10 +365,18 @@ final class ReaderViewModel: ObservableObject {
         sourceLanguageOverrides = [:]
         activePane = .primary
         workspaceGeneration = UUID()
+        pendingFileTreeSelectionTarget = fileTreeSelectionTarget
+        fileTreeSelectionRequest = FileTreeSelectionRequest(target: .none)
         fileOperationError = nil
 
         rememberWorkspace(url, existingBookmarkData: bookmarkData)
-        rescanWorkspace()
+        let revealingURL: URL?
+        if case .url(let url) = fileTreeSelectionTarget {
+            revealingURL = url
+        } else {
+            revealingURL = nil
+        }
+        rescanWorkspace(revealing: revealingURL)
     }
 
     func rescanWorkspace(revealing revealingURL: URL? = nil) {
@@ -405,6 +439,12 @@ final class ReaderViewModel: ObservableObject {
                 }
                 if self.rootIsLoading {
                     self.rootIsLoading = false
+                }
+                if let selectionTarget = self.pendingFileTreeSelectionTarget {
+                    self.pendingFileTreeSelectionTarget = nil
+                    self.fileTreeSelectionRequest = FileTreeSelectionRequest(
+                        target: selectionTarget
+                    )
                 }
                 self.rootTask = nil
             } catch is CancellationError {
@@ -483,6 +523,17 @@ final class ReaderViewModel: ObservableObject {
         }
 
         let targetPane = hasSecondPane ? activePane : .primary
+        if pane(targetPane, isShowing: node.url) {
+            activePane = targetPane
+            return
+        }
+        if hasSecondPane {
+            let otherPane = targetPane.otherPane
+            if pane(otherPane, isShowing: node.url) {
+                activePane = otherPane
+                return
+            }
+        }
         activePane = targetPane
         loadDocumentOrUnsupported(at: node.url, in: targetPane)
     }
@@ -491,7 +542,14 @@ final class ReaderViewModel: ObservableObject {
         guard !node.isDirectory else { return }
         let targetPane = hasSecondPane ? activePane.otherPane : .reference
         activePane = targetPane
+        if pane(targetPane, isShowing: node.url) {
+            return
+        }
         loadDocumentOrUnsupported(at: node.url, in: targetPane)
+    }
+
+    private func pane(_ pane: ReaderPaneID, isShowing url: URL) -> Bool {
+        selectedURL(for: pane)?.standardizedFileURL == url.standardizedFileURL
     }
 
     func toggleSplitReading() {
@@ -1659,7 +1717,11 @@ final class ReaderViewModel: ObservableObject {
             }
             return
         }
-        openWorkspace(resolvedWorkspace.url, bookmarkData: resolvedWorkspace.bookmarkData)
+        openWorkspace(
+            resolvedWorkspace.url,
+            bookmarkData: resolvedWorkspace.bookmarkData,
+            fileTreeSelectionTarget: .firstRootNode
+        )
     }
 
     private func rememberWorkspace(_ url: URL, existingBookmarkData: Data?) {

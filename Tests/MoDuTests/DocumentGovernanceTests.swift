@@ -864,6 +864,97 @@ struct DocumentGovernanceTests {
         #expect(model.referenceURL == nil)
     }
 
+    @Test("Opening an assigned file activates its pane without replacing document state")
+    @MainActor
+    func readerViewModelReusesAssignedPane() {
+        _ = NSApplication.shared
+        let model = ReaderViewModel(restorePersistedState: false)
+        let primaryURL = URL(fileURLWithPath: "/tmp/primary.md")
+        let referenceURL = URL(fileURLWithPath: "/tmp/reference.md")
+        let primaryGeneration = UUID()
+        let referenceGeneration = UUID()
+
+        var primary = ReaderPaneState()
+        primary.selectedURL = primaryURL
+        primary.documentState = .unsupported(primaryURL)
+        primary.documentGeneration = primaryGeneration
+        model.installPaneStateForTesting(primary, in: .primary)
+
+        var reference = ReaderPaneState()
+        reference.selectedURL = referenceURL
+        reference.documentState = .unsupported(referenceURL)
+        reference.documentGeneration = referenceGeneration
+        model.installPaneStateForTesting(reference, in: .reference)
+        model.activatePane(.reference)
+
+        let primaryNode = FileNode(entry: FileEntry(url: primaryURL, kind: .file))
+        model.select(primaryNode)
+
+        #expect(model.activePane == .primary)
+        #expect(model.paneStateForTesting(.primary)?.documentGeneration == primaryGeneration)
+        #expect(model.paneStateForTesting(.reference)?.documentGeneration == referenceGeneration)
+
+        model.select(primaryNode)
+        #expect(model.activePane == .primary)
+        #expect(model.paneStateForTesting(.primary)?.documentGeneration == primaryGeneration)
+
+        let referenceNode = FileNode(entry: FileEntry(url: referenceURL, kind: .file))
+        model.openInOtherPane(referenceNode)
+        #expect(model.activePane == .reference)
+        #expect(model.paneStateForTesting(.reference)?.documentGeneration == referenceGeneration)
+    }
+
+    @Test("Workspace changes reset file-tree selection and direct file opens reveal their target")
+    @MainActor
+    func workspaceFileTreeSelectionLifecycle() async throws {
+        _ = NSApplication.shared
+        let firstRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("modu-selection-first-\(UUID().uuidString)", isDirectory: true)
+        let secondRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("modu-selection-second-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstRoot)
+            try? FileManager.default.removeItem(at: secondRoot)
+        }
+
+        let firstEntry = firstRoot.appendingPathComponent("first.md")
+        try "# First\n".write(to: firstEntry, atomically: true, encoding: .utf8)
+        let nestedDirectory = secondRoot.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+        let directDocument = nestedDirectory.appendingPathComponent("direct.md")
+        try "# Direct\n".write(to: directDocument, atomically: true, encoding: .utf8)
+
+        let model = ReaderViewModel(restorePersistedState: false)
+        model.openWorkspace(firstRoot)
+        #expect(model.fileTreeSelectionRequest?.target == FileTreeSelectionTarget.none)
+        #expect(await waitUntil {
+            model.fileTreeSelectionRequest?.target == .firstRootNode
+        })
+        #expect(model.rootNodes.first?.id == firstEntry.standardizedFileURL.path)
+
+        model.openWorkspace(secondRoot)
+        #expect(model.fileTreeSelectionRequest?.target == FileTreeSelectionTarget.none)
+        #expect(await waitUntil {
+            model.fileTreeSelectionRequest?.target == .firstRootNode
+        })
+
+        model.openWorkspace(
+            WorkspaceOpenRequest(
+                workspaceURL: secondRoot,
+                documentURL: directDocument
+            )
+        )
+        #expect(model.fileTreeSelectionRequest?.target == FileTreeSelectionTarget.none)
+        #expect(await waitUntil {
+            model.fileTreeSelectionRequest?.target == .url(directDocument.standardizedFileURL)
+        })
+        let notesNode = try #require(model.rootNodes.first { $0.url == nestedDirectory })
+        #expect(notesNode.isExpanded)
+        #expect(notesNode.children?.contains { $0.url == directDocument } == true)
+    }
+
     @Test("Source session keeps the validated in-workspace target after symlink retargeting")
     func sourceSessionSymlinkIdentity() throws {
         try withTemporaryRoot { root in
