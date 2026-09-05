@@ -87,3 +87,7 @@ modu --version
 正式交付默认拒绝包含未提交或未跟踪输入的工作树。仅需验证开发态改动时可显式使用 `ALLOW_DIRTY_BUILD=1`；此时 `build/` 会额外保留完整二进制 patch 和未跟踪文件归档，不能将其当作基于提交的正式发布。
 
 `Config/release-baseline.json` 固定上一份正式交付的版本、构建号和 Git 提交；发布门禁会复核该提交中的真实 plist，并要求本次版本和构建号都严格递增。完成一次正式交付后，应在开始下一版本前把该基线更新为刚交付的提交，禁止把当前 HEAD 当作“上一版本”自比较。
+
+## 产品官网
+
+产品展示站点位于 [`website/`](website/README.md)，包含功能介绍、阅读主题说明和 GitHub Releases 入口。仓库根目录的 `vercel.json` 已配置 Vercel 自动构建；导入 GitHub 仓库时，Root Directory 保持仓库根目录即可。详细预览和部署步骤见 [站点说明](website/README.md)。

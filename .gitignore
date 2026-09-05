@@ -73,3 +73,7 @@ xcuserdata/
 *~
 .idea/
 .vscode/
+
+# Product website generated output
+website/dist/
+.vercel/
