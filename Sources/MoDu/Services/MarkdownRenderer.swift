@@ -242,7 +242,7 @@ final class MarkdownRenderer {
         case is ThematicBreak:
             body += "<hr>\n"
         case let html as HTMLBlock:
-            body += "<pre class=\"raw-html\"><code>\(escapeText(html.rawHTML))</code></pre>\n"
+            body += MarkdownHTMLSanitizer.render(html.rawHTML, link: resolvedLink, image: resolvedImage) + "\n"
         default:
             for child in markup.children { try renderBlock(child) }
         }
@@ -396,7 +396,7 @@ final class MarkdownRenderer {
         case is LineBreak:
             body += "<br>\n"
         case let html as InlineHTML:
-            body += escapeText(html.rawHTML)
+            body += MarkdownHTMLSanitizer.render(html.rawHTML, link: resolvedLink, image: resolvedImage)
         case let symbol as SymbolLink:
             if let destination = symbol.destination {
                 body += "<code>\(escapeText(destination))</code>"

@@ -198,6 +198,14 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
         license: internal
         ---
         # Metadata 实机检查
+
+        <details id="embedded-details"><summary>HTML details</summary><p id="embedded-content">Visible content</p></details>
+
+        Inline<br><span id="embedded-span" style="color: rgb(255, 0, 0)" onclick="window.embeddedUnsafe = true">red</span>
+
+        <table id="embedded-table"><tr><td>HTML cell</td></tr></table>
+
+        <script>window.embeddedUnsafe = true</script>
         """
         do {
             let rendered = try MarkdownRenderer(
@@ -220,6 +228,18 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
           const details = document.querySelector('.front-matter-more');
           const previewValue = document.querySelector('.front-matter-preview .front-matter-row:nth-child(2) dd');
           const remainder = document.querySelector('.front-matter-remainder');
+          const embedded = document.querySelector('#embedded-details');
+          const embeddedClosed = Boolean(embedded && !embedded.open);
+          embedded?.querySelector('summary')?.click();
+          const embeddedSpan = document.querySelector('#embedded-span');
+          embeddedSpan?.click();
+          const embeddedHTMLPassed = embeddedClosed && embedded.open &&
+            document.querySelector('#embedded-content').getBoundingClientRect().height > 0 &&
+            embeddedSpan?.previousElementSibling?.tagName === 'BR' &&
+            getComputedStyle(embeddedSpan).color === 'rgb(255, 0, 0)' &&
+            document.querySelector('#embedded-table td')?.textContent === 'HTML cell' &&
+            !embeddedSpan.hasAttribute('onclick') && !window.embeddedUnsafe &&
+            !document.querySelector('#write script');
           const initiallyClosed = Boolean(details && !details.open);
           const collapsedHeight = previewValue?.getBoundingClientRect().height || 0;
           const initiallyClamped = Boolean(previewValue && previewValue.scrollHeight > previewValue.clientHeight);
@@ -233,6 +253,7 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
             metadataTitle: document.querySelector('.front-matter-title')?.textContent || '',
             expandLabel: document.querySelector('.front-matter-expand')?.textContent || '',
             rowCount: document.querySelectorAll('.front-matter-row').length,
+            embeddedHTMLPassed,
             initiallyClosed,
             initiallyClamped,
             expanded: expandedHeight > collapsedHeight,
@@ -249,7 +270,8 @@ final class WebViewSelfCheck: NSObject, WKNavigationDelegate {
                 return
             }
             let result = value as? [String: Any]
-            let passed = result?["htmlLanguage"] as? String == L10n.htmlLanguageCode &&
+            let passed = result?["embeddedHTMLPassed"] as? Bool == true &&
+                result?["htmlLanguage"] as? String == L10n.htmlLanguageCode &&
                 result?["metadataTitle"] as? String == L10n.string(.metadataTitle) &&
                 result?["expandLabel"] as? String == L10n.format(.metadataExpandRemaining, 2) &&
                 result?["rowCount"] as? Int == 6 &&
