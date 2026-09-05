@@ -97,6 +97,7 @@ enum L10n {
         case sidebarNoOtherRecent = "sidebar.noOtherRecent"
         case sidebarOpenOther = "sidebar.openOther"
         case sidebarClearRecent = "sidebar.clearRecent"
+        case sidebarRemoveRecent = "sidebar.removeRecent"
         case sidebarEmpty = "sidebar.empty"
         case sidebarOpenFolder = "sidebar.openFolder"
         case documentClosePane = "document.closePane"

@@ -38,6 +38,7 @@ struct MoDuReaderCommands: Commands {
                     Button(L10n.string(.commandClearMenu)) {
                         model.clearRecentWorkspaces()
                     }
+                    .disabled(!model.canClearRecentWorkspaces)
                 }
             }
         }

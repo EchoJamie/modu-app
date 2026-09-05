@@ -65,9 +65,19 @@ final class ApplicationState: ObservableObject {
         defaults.set(newStyle.rawValue, forKey: "markdownStyle")
     }
 
-    func clearRecentWorkspaces() {
-        recentWorkspaces = []
-        defaults.removeObject(forKey: Self.recentWorkspaceBookmarksKey)
+    func clearRecentWorkspaces(preserving currentURL: URL?) throws {
+        // Resolve the retained bookmark before mutating history so a failure
+        // cannot discard the last restorable workspace.
+        let retainedWorkspace: RecentWorkspace?
+        if let currentURL {
+            retainedWorkspace = try recentWorkspaces.first {
+                $0.id == currentURL.standardizedFileURL.path
+            } ?? RecentWorkspace(url: currentURL, bookmarkData: makeBookmark(for: currentURL))
+        } else {
+            retainedWorkspace = nil
+        }
+        recentWorkspaces = retainedWorkspace.map { [$0] } ?? []
+        persistRecentWorkspaces()
     }
 
     func resolvedRecentWorkspace(_ workspace: RecentWorkspace) -> RecentWorkspace? {

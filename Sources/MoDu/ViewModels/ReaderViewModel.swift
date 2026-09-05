@@ -1357,8 +1357,23 @@ final class ReaderViewModel: ObservableObject {
         openRecentWorkspace(workspace, reportFailure: true)
     }
 
+    var canClearRecentWorkspaces: Bool {
+        recentWorkspaces.contains { $0.id != rootURL?.standardizedFileURL.path }
+    }
+
+    func removeRecentWorkspace(_ workspace: RecentWorkspace) {
+        guard workspace.id != rootURL?.standardizedFileURL.path else { return }
+        applicationState.removeRecentWorkspace(id: workspace.id)
+    }
+
     func clearRecentWorkspaces() {
-        applicationState.clearRecentWorkspaces()
+        do {
+            try applicationState.clearRecentWorkspaces(preserving: rootURL)
+        } catch {
+            fileOperationError = ReaderFileOperationError
+                .bookmarkCreationFailed(error.localizedDescription)
+                .localizedDescription
+        }
     }
 
     func scroll(to item: OutlineItem, in pane: ReaderPaneID) {

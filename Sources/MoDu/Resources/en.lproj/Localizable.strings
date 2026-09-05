@@ -89,6 +89,7 @@
 "sidebar.noOtherRecent" = "No other recent folders";
 "sidebar.openOther" = "Open Another Folder…";
 "sidebar.clearRecent" = "Clear History";
+"sidebar.removeRecent" = "Remove “%@” from History";
 "sidebar.empty" = "Files in the folder will appear here";
 "sidebar.openFolder" = "Open Folder";
 

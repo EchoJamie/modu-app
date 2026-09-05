@@ -51,6 +51,27 @@ struct SidebarView: View {
             .frame(height: 36)
         }
         .background(theme.chrome)
+        .overlay(alignment: .top) {
+            if workspaceSwitcherIsPresented {
+                ZStack(alignment: .top) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { workspaceSwitcherIsPresented = false }
+
+                    workspaceSwitcher
+                        .fixedSize(horizontal: false, vertical: true)
+                        .overlay(alignment: .bottom) {
+                            Divider().overlay(theme.divider.opacity(0.75))
+                        }
+                        .shadow(color: .black.opacity(theme.isDark ? 0.28 : 0.12), radius: 8, y: 5)
+                }
+                .padding(.top, 53)
+            }
+        }
+        .clipped()
+        .onChange(of: model.rootURL) { _ in
+            workspaceSwitcherIsPresented = false
+        }
         .alert(
             L10n.string(.sidebarOperationFailed),
             isPresented: Binding(
@@ -115,9 +136,6 @@ struct SidebarView: View {
             .focusable(false)
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(L10n.string(.sidebarSwitchHelp))
-            .popover(isPresented: $workspaceSwitcherIsPresented, arrowEdge: .bottom) {
-                workspaceSwitcher
-            }
 
             if model.rootURL != nil {
                 Button {
@@ -139,36 +157,6 @@ struct SidebarView: View {
 
     private var workspaceSwitcher: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L10n.string(.sidebarSwitchTitle))
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(theme.foreground)
-
-            if let rootURL = model.rootURL {
-                HStack(spacing: 9) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(theme.accent)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(rootURL.lastPathComponent)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(theme.foreground)
-                        Text(rootURL.path)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(theme.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(theme.accent)
-                }
-                .padding(9)
-                .background(theme.accent.opacity(theme.isDark ? 0.16 : 0.09))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-
-            Divider().overlay(theme.divider.opacity(0.75))
-
             Text(L10n.string(.sidebarRecent))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(theme.secondary)
@@ -189,74 +177,61 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 240)
+                .frame(height: min(CGFloat(switchableWorkspaces.count) * 46 - 3, 240))
             }
 
             Divider().overlay(theme.divider.opacity(0.75))
 
-            HStack {
-                Button {
-                    workspaceSwitcherIsPresented = false
-                    DispatchQueue.main.async {
-                        model.chooseFolder()
-                    }
-                } label: {
-                    Label(L10n.string(.sidebarOpenOther), systemImage: "folder.badge.plus")
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    openOtherWorkspaceButton
+                    Spacer(minLength: 12)
+                    clearRecentWorkspacesButton
                 }
-                .focusable(false)
-
-                Spacer()
-
-                if !model.recentWorkspaces.isEmpty {
-                    Button(L10n.string(.sidebarClearRecent)) {
-                        model.clearRecentWorkspaces()
-                    }
-                        .focusable(false)
-                        .foregroundStyle(theme.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    openOtherWorkspaceButton
+                    clearRecentWorkspacesButton
                 }
             }
             .font(.system(size: 11.5, weight: .medium))
             .buttonStyle(.plain)
         }
         .padding(12)
-        .frame(width: 340)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.chrome)
     }
 
-    private func workspaceSwitchRow(_ workspace: RecentWorkspace) -> some View {
+    private var openOtherWorkspaceButton: some View {
         Button {
             workspaceSwitcherIsPresented = false
-            model.openRecentWorkspace(workspace)
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "folder")
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(workspace.name)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(theme.foreground)
-                        .lineLimit(1)
-                    Text(workspace.displayPath)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(theme.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8.5, weight: .bold))
-                    .foregroundStyle(theme.secondary)
+            DispatchQueue.main.async {
+                model.chooseFolder()
             }
-            .padding(.horizontal, 8)
-            .frame(height: 43)
-            .contentShape(Rectangle())
+        } label: {
+            Label(L10n.string(.sidebarOpenOther), systemImage: "folder.badge.plus")
         }
-        .buttonStyle(.plain)
         .focusable(false)
-        .background(theme.canvas.opacity(theme.isDark ? 0.5 : 0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .help(workspace.displayPath)
+    }
+
+    @ViewBuilder
+    private var clearRecentWorkspacesButton: some View {
+        if !model.recentWorkspaces.isEmpty {
+            Button(L10n.string(.sidebarClearRecent)) {
+                model.clearRecentWorkspaces()
+            }
+            .disabled(!model.canClearRecentWorkspaces)
+            .focusable(false)
+            .foregroundStyle(theme.secondary)
+        }
+    }
+
+    private func workspaceSwitchRow(_ workspace: RecentWorkspace) -> some View {
+        RecentWorkspaceRow(workspace: workspace, theme: theme) {
+            workspaceSwitcherIsPresented = false
+            model.openRecentWorkspace(workspace)
+        } onRemove: {
+            model.removeRecentWorkspace(workspace)
+        }
     }
 
     private var emptySidebar: some View {
@@ -280,5 +255,80 @@ struct SidebarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+}
+
+private struct RecentWorkspaceRow: View {
+    let workspace: RecentWorkspace
+    let theme: ResolvedReaderTheme
+    let onOpen: () -> Void
+    let onRemove: () -> Void
+
+    @State private var isHovered = false
+    @State private var removeIsHovered = false
+
+    private var removeLabel: String {
+        L10n.format(.sidebarRemoveRecent, workspace.name)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onOpen) {
+                HStack(spacing: 9) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(theme.accent)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(workspace.name)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(theme.foreground)
+                            .lineLimit(1)
+                        Text(workspace.displayPath)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .padding(.leading, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 43)
+                .contentShape(Rectangle())
+            }
+            .help(workspace.displayPath)
+
+            // Reserve the trailing slot so showing the remove action never shifts text.
+            ZStack {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(removeIsHovered ? theme.foreground : theme.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            removeIsHovered ? theme.foreground.opacity(0.12) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .help(removeLabel)
+                .accessibilityLabel(removeLabel)
+                .opacity(isHovered ? 1 : 0)
+                .allowsHitTesting(isHovered)
+                .accessibilityHidden(!isHovered)
+                .onHover { removeIsHovered = $0 }
+            }
+            .frame(width: 24, height: 43)
+            .padding(.trailing, 8)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .background(theme.canvas.opacity(theme.isDark ? 0.5 : 0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovered = hovering
+            if !hovering { removeIsHovered = false }
+        }
     }
 }
