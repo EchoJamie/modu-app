@@ -351,6 +351,7 @@ final class ReaderViewModel: ObservableObject {
         fileTreeSelectionTarget: FileTreeSelectionTarget
     ) {
         rootTask?.cancel()
+        FileTreeMerger.prepareForRefresh(rootNodes)
         for pane in Array(paneStates.keys) {
             updatePane(pane) { $0.cancelAllTasks() }
         }
@@ -377,6 +378,20 @@ final class ReaderViewModel: ObservableObject {
             revealingURL = nil
         }
         rescanWorkspace(revealing: revealingURL)
+    }
+
+    var canRevealActiveDocumentInFileTree: Bool {
+        guard !rootIsLoading, let rootURL, let url = selectedURL(for: activePane) else { return false }
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let fileComponents = url.standardizedFileURL.pathComponents
+        return fileComponents.count > rootComponents.count && fileComponents.starts(with: rootComponents)
+    }
+
+    func revealActiveDocumentInFileTree() {
+        guard canRevealActiveDocumentInFileTree, let url = selectedURL(for: activePane) else { return }
+        let target = url.standardizedFileURL
+        pendingFileTreeSelectionTarget = .url(target)
+        rescanWorkspace(revealing: target)
     }
 
     func rescanWorkspace(revealing revealingURL: URL? = nil) {
@@ -469,6 +484,7 @@ final class ReaderViewModel: ObservableObject {
         node.loadingTask = nil
         node.loadingGeneration = UUID()
         if !expanded {
+            FileTreeMerger.prepareForRefresh(node.children ?? [])
             node.isExpanded = false
             node.isLoading = false
             node.children = nil
@@ -486,7 +502,7 @@ final class ReaderViewModel: ObservableObject {
         let loadingTask = Task { [weak self, weak node, accessSession] in
             defer { _ = accessSession }
             do {
-                let entries = try await FileSystemService.entries(at: nodeURL, inside: rootURL)
+                let chain = try await FileSystemService.directoryChain(at: nodeURL, inside: rootURL)
                 try Task.checkCancellation()
                 guard
                     let node,
@@ -496,7 +512,16 @@ final class ReaderViewModel: ObservableObject {
                     node.isExpanded,
                     node.loadingGeneration == loadingToken
                 else { return }
-                node.children = entries.map(FileNode.init)
+                guard let first = chain.first else { return }
+                let descendants = chain.dropFirst()
+                node.children = FileTreeMerger.merge(
+                    entries: first.entries,
+                    reusing: node.children ?? [],
+                    refreshedEntriesByDirectory: Dictionary(uniqueKeysWithValues: descendants.map {
+                        ($0.url.standardizedFileURL.path, $0.entries)
+                    }),
+                    forcedExpandedPaths: Set(descendants.map { $0.url.standardizedFileURL.path })
+                )
                 node.isLoading = false
                 node.loadingTask = nil
             } catch is CancellationError {

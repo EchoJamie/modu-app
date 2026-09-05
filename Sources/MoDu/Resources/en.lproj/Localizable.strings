@@ -90,6 +90,7 @@
 "sidebar.openOther" = "Open Another Folder…";
 "sidebar.clearRecent" = "Clear History";
 "sidebar.removeRecent" = "Remove “%@” from History";
+"sidebar.revealCurrentFile" = "Locate the active pane’s file in the folder tree";
 "sidebar.empty" = "Files in the folder will appear here";
 "sidebar.openFolder" = "Open Folder";
 

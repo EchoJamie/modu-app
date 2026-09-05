@@ -44,7 +44,9 @@ struct SidebarView: View {
                     .font(.system(size: 11))
                 Text(L10n.string(.sidebarTagline))
                     .font(.system(size: 11, weight: .medium))
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                directoryActions
             }
             .foregroundStyle(theme.secondary)
             .padding(.horizontal, 13)
@@ -136,23 +138,37 @@ struct SidebarView: View {
             .focusable(false)
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(L10n.string(.sidebarSwitchHelp))
-
-            if model.rootURL != nil {
-                Button {
-                    model.rescanWorkspace()
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .foregroundStyle(theme.secondary)
-                .help(L10n.string(.sidebarReloadHelp))
-            }
         }
         .padding(.horizontal, 12)
         .frame(height: 52)
+    }
+
+    private var directoryActions: some View {
+        HStack(spacing: 4) {
+            Button {
+                model.revealActiveDocumentInFileTree()
+            } label: {
+                Image(systemName: "scope")
+                    .frame(width: 24, height: 24)
+            }
+            .disabled(!model.canRevealActiveDocumentInFileTree)
+            .help(L10n.string(.sidebarRevealCurrentFile))
+            .accessibilityLabel(L10n.string(.sidebarRevealCurrentFile))
+
+            Button {
+                model.rescanWorkspace()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .frame(width: 24, height: 24)
+            }
+            .disabled(model.rootURL == nil || model.rootIsLoading)
+            .help(L10n.string(.sidebarReloadHelp))
+            .accessibilityLabel(L10n.string(.sidebarReloadHelp))
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .buttonStyle(.plain)
+        .focusable(false)
+        .foregroundStyle(theme.secondary)
     }
 
     private var workspaceSwitcher: some View {
@@ -160,6 +176,7 @@ struct SidebarView: View {
             Text(L10n.string(.sidebarRecent))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(theme.secondary)
+                .padding(.horizontal, 12)
 
             let switchableWorkspaces = model.recentWorkspaces.filter {
                 $0.id != model.rootURL?.standardizedFileURL.path
@@ -169,18 +186,21 @@ struct SidebarView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(theme.secondary)
                     .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 3) {
+                    LazyVStack(spacing: 0) {
                         ForEach(switchableWorkspaces) { workspace in
                             workspaceSwitchRow(workspace)
                         }
                     }
                 }
-                .frame(height: min(CGFloat(switchableWorkspaces.count) * 46 - 3, 240))
+                .frame(height: min(CGFloat(switchableWorkspaces.count) * RecentWorkspaceRow.height, 240))
+                .padding(.horizontal, 12)
             }
 
             Divider().overlay(theme.divider.opacity(0.75))
+                .padding(.horizontal, 12)
 
             ViewThatFits(in: .horizontal) {
                 HStack {
@@ -195,8 +215,9 @@ struct SidebarView: View {
             }
             .font(.system(size: 11.5, weight: .medium))
             .buttonStyle(.plain)
+            .padding(.horizontal, 12)
         }
-        .padding(12)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.chrome)
     }
@@ -259,6 +280,8 @@ struct SidebarView: View {
 }
 
 private struct RecentWorkspaceRow: View {
+    static let height: CGFloat = 49
+
     let workspace: RecentWorkspace
     let theme: ResolvedReaderTheme
     let onOpen: () -> Void
@@ -293,7 +316,7 @@ private struct RecentWorkspaceRow: View {
                 }
                 .padding(.leading, 8)
                 .frame(maxWidth: .infinity)
-                .frame(height: 43)
+                .frame(height: Self.height)
                 .contentShape(Rectangle())
             }
             .help(workspace.displayPath)
@@ -318,13 +341,15 @@ private struct RecentWorkspaceRow: View {
                 .accessibilityHidden(!isHovered)
                 .onHover { removeIsHovered = $0 }
             }
-            .frame(width: 24, height: 43)
+            .frame(width: 24, height: Self.height)
             .padding(.trailing, 8)
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .background(theme.canvas.opacity(theme.isDark ? 0.5 : 0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(
+            isHovered ? theme.foreground.opacity(theme.isDark ? 0.07 : 0.05) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+        )
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovered = hovering

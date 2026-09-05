@@ -151,7 +151,9 @@ struct FileTreeView: View {
     private func moveFocus(by offset: Int) -> Bool {
         guard
             let selectedNodeID,
-            let currentIndex = visibleNodes.firstIndex(where: { $0.id == selectedNodeID })
+            let currentIndex = visibleRows.firstIndex(where: { row in
+                row.contains { $0.id == selectedNodeID }
+            })
         else { return false }
 
         let targetIndex = min(max(currentIndex + offset, 0), visibleNodes.count - 1)
@@ -190,19 +192,12 @@ struct FileTreeView: View {
         return true
     }
 
-    private var visibleNodes: [FileNode] {
-        flattenedVisibleNodes(in: model.rootNodes)
+    private var visibleRows: [[FileNode]] {
+        FileTreeCompactLayout.visibleRows(in: model.rootNodes, editingNodeID: editingNodeID)
     }
 
-    private func flattenedVisibleNodes(in nodes: [FileNode]) -> [FileNode] {
-        var result: [FileNode] = []
-        for node in nodes {
-            result.append(node)
-            if node.isExpanded, let children = node.children {
-                result.append(contentsOf: flattenedVisibleNodes(in: children))
-            }
-        }
-        return result
+    private var visibleNodes: [FileNode] {
+        visibleRows.compactMap { $0.last }
     }
 
     private func findParent(of id: String, in nodes: [FileNode], parent: FileNode? = nil) -> FileNode? {
@@ -267,11 +262,39 @@ private struct FileTreeRow: View {
     let onBeginRename: (FileNode) -> Void
     let onCommitRename: (FileNode) -> Void
     let onCancelRename: (FileNode) -> Void
+    var compactedAncestors: [FileNode] = []
     @FocusState private var renameFieldIsFocused: Bool
 
     private var theme: ResolvedReaderTheme { model.resolvedTheme }
 
     var body: some View {
+        Group {
+            if let child = FileTreeCompactLayout.compactedChild(of: node, editingNodeID: editingNodeID) {
+                // Match the ordinary child branch: ForEach provides a dynamic list
+                // boundary so SwiftUI never recursively counts FileTreeRow's type.
+                ForEach([child]) { child in
+                    FileTreeRow(
+                        node: child,
+                        depth: depth,
+                        selectedNodeID: $selectedNodeID,
+                        selectionIsActive: selectionIsActive,
+                        editingNodeID: editingNodeID,
+                        renameDraft: $renameDraft,
+                        onFocusNode: onFocusNode,
+                        onBeginRename: onBeginRename,
+                        onCommitRename: onCommitRename,
+                        onCancelRename: onCancelRename,
+                        compactedAncestors: compactedAncestors + [node]
+                    )
+                }
+            } else {
+                expandedRow
+            }
+        }
+        .id(node.id)
+    }
+
+    private var expandedRow: some View {
         VStack(alignment: .leading, spacing: 2) {
             if editingNodeID == node.id {
                 rowContent
@@ -293,34 +316,18 @@ private struct FileTreeRow: View {
                     })
                     .padding(.leading, CGFloat(depth) * 15)
                     .contextMenu {
-                        if !node.isDirectory {
-                            Button {
-                                onFocusNode(node)
-                                model.openInOtherPane(node)
-                            } label: {
-                                contextMenuLabel(L10n.string(.fileTreeOpenOtherPane), shortcut: "⌥↩")
+                        if compactedAncestors.isEmpty {
+                            nodeActions(node)
+                        } else {
+                            ForEach(compactedAncestors + [node]) { target in
+                                Menu(target.name) {
+                                    nodeActions(target)
+                                }
+                                .help(target.url.path)
                             }
-
-                            Divider()
-                        }
-
-                        Button {
-                            onFocusNode(node)
-                            onBeginRename(node)
-                        } label: {
-                            contextMenuLabel(
-                                L10n.string(.fileTreeRename),
-                                shortcut: L10n.string(.fileTreeReturnKey)
-                            )
-                        }
-
-                        Button {
-                            onFocusNode(node)
-                            model.copyAbsolutePath(of: node)
-                        } label: {
-                            contextMenuLabel(L10n.string(.fileTreeCopyPath), shortcut: "⌘C")
                         }
                     }
+                    .help(node.url.path)
             }
 
             if node.isExpanded, let children = node.children {
@@ -340,7 +347,6 @@ private struct FileTreeRow: View {
                 }
             }
         }
-        .id(node.id)
     }
 
     private var rowContent: some View {
@@ -380,7 +386,7 @@ private struct FileTreeRow: View {
                         onCancelRename(node)
                     }
             } else {
-                Text(node.name)
+                Text((compactedAncestors + [node]).map(\.name).joined(separator: " / "))
                     .font(.system(size: 13, weight: node.isPreviewable ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -410,7 +416,7 @@ private struct FileTreeRow: View {
         if editingNodeID == node.id {
             return theme.accent.opacity(theme.isDark ? 0.28 : 0.17)
         }
-        if selectedNodeID == node.id {
+        if (compactedAncestors + [node]).contains(where: { $0.id == selectedNodeID }) {
             if selectionIsActive {
                 return theme.accent.opacity(theme.isDark ? 0.28 : 0.17)
             }
@@ -418,6 +424,31 @@ private struct FileTreeRow: View {
                 .opacity(theme.isDark ? 0.72 : 0.62)
         }
         return .clear
+    }
+
+    @ViewBuilder
+    private func nodeActions(_ target: FileNode) -> some View {
+        if !target.isDirectory {
+            Button {
+                onFocusNode(target)
+                model.openInOtherPane(target)
+            } label: {
+                contextMenuLabel(L10n.string(.fileTreeOpenOtherPane), shortcut: "⌥↩")
+            }
+            Divider()
+        }
+        Button {
+            onFocusNode(target)
+            onBeginRename(target)
+        } label: {
+            contextMenuLabel(L10n.string(.fileTreeRename), shortcut: L10n.string(.fileTreeReturnKey))
+        }
+        Button {
+            onFocusNode(target)
+            model.copyAbsolutePath(of: target)
+        } label: {
+            contextMenuLabel(L10n.string(.fileTreeCopyPath), shortcut: "⌘C")
+        }
     }
 
     private func contextMenuLabel(_ title: String, shortcut: String) -> some View {

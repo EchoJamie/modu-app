@@ -90,6 +90,7 @@
 "sidebar.openOther" = "打开其他目录…";
 "sidebar.clearRecent" = "清除记录";
 "sidebar.removeRecent" = "从历史记录中移除“%@”";
+"sidebar.revealCurrentFile" = "在目录树中定位当前阅读区的文件";
 "sidebar.empty" = "目录中的文件会显示在这里";
 "sidebar.openFolder" = "打开目录";
 

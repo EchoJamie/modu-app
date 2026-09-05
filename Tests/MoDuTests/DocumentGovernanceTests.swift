@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import MoDu
 @testable import MoDuCLIInstaller
@@ -1002,6 +1003,104 @@ struct DocumentGovernanceTests {
         let notesNode = try #require(model.rootNodes.first { $0.url == nestedDirectory })
         #expect(notesNode.isExpanded)
         #expect(notesNode.children?.contains { $0.url == directDocument } == true)
+    }
+
+    @Test("Locate current file follows the active pane and expands its path without switching documents")
+    @MainActor
+    func locateActivePaneFile() async throws {
+        _ = NSApplication.shared
+        let suiteName = "LocateCurrentFileTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("modu-locate-\(UUID().uuidString)", isDirectory: true)
+        let nested = root.appendingPathComponent("notes/deep", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let primaryURL = root.appendingPathComponent("primary.md")
+        let referenceURL = nested.appendingPathComponent("reference.md")
+        for url in [primaryURL, referenceURL] {
+            try "# Document".write(to: url, atomically: true, encoding: .utf8)
+        }
+        let model = ReaderViewModel(
+            restorePersistedState: false,
+            applicationState: ApplicationState(defaults: defaults)
+        )
+        #expect(!model.canRevealActiveDocumentInFileTree)
+        model.openWorkspace(root)
+        #expect(await waitUntil { !model.rootIsLoading })
+        #expect(!model.canRevealActiveDocumentInFileTree)
+
+        var primary = ReaderPaneState()
+        primary.selectedURL = primaryURL
+        var reference = ReaderPaneState()
+        reference.selectedURL = referenceURL
+        model.installPaneStateForTesting(primary, in: .primary)
+        model.installPaneStateForTesting(reference, in: .reference)
+        model.activatePane(.reference)
+        #expect(model.canRevealActiveDocumentInFileTree)
+        model.revealActiveDocumentInFileTree()
+        #expect(await waitUntil { model.fileTreeSelectionRequest?.target == .url(referenceURL) })
+        let notes = try #require(model.rootNodes.first { $0.url.lastPathComponent == "notes" })
+        let deep = try #require(notes.children?.first { $0.url.lastPathComponent == "deep" })
+        #expect(notes.isExpanded && deep.isExpanded)
+        #expect(deep.children?.contains { $0.url == referenceURL } == true)
+        let compactRows = FileTreeCompactLayout.visibleRows(in: model.rootNodes)
+        #expect(compactRows.contains { $0.map(\.id) == [notes.id, deep.id] })
+        #expect(compactRows.contains { $0.last?.url == referenceURL })
+        // Exercise SwiftUI's row layout as well as the pure compact-directory projection.
+        let hostedTree = NSHostingView(rootView: FileTreeView().environmentObject(model))
+        hostedTree.frame = NSRect(x: 0, y: 0, width: 280, height: 500)
+        hostedTree.layoutSubtreeIfNeeded()
+        #expect(hostedTree.fittingSize.height.isFinite)
+        #expect(model.activePane == .reference)
+        #expect(model.selectedURL == primaryURL)
+        #expect(model.referenceURL == referenceURL)
+
+        // Repeatedly transition between unloaded, compact, and branching layouts.
+        // Keep the real hosting view alive so every transition reaches SwiftUI.
+        let branchFile = notes.url.appendingPathComponent("branch.md")
+        for iteration in 0..<30 {
+            model.setExpanded(notes, expanded: false)
+            hostedTree.layoutSubtreeIfNeeded()
+            #expect(notes.children == nil)
+            model.setExpanded(notes, expanded: true)
+            #expect(await waitUntil { !notes.isLoading && notes.children != nil })
+            hostedTree.layoutSubtreeIfNeeded()
+
+            if iteration.isMultiple(of: 2) {
+                try "# Branch".write(to: branchFile, atomically: true, encoding: .utf8)
+            } else {
+                try FileManager.default.removeItem(at: branchFile)
+            }
+            let requestID = model.fileTreeSelectionRequest?.id
+            model.rescanWorkspace()
+            model.revealActiveDocumentInFileTree()
+            #expect(await waitUntil { model.fileTreeSelectionRequest?.id != requestID })
+            hostedTree.layoutSubtreeIfNeeded()
+            #expect(hostedTree.fittingSize.height.isFinite)
+            let rows = FileTreeCompactLayout.visibleRows(in: model.rootNodes)
+            #expect(rows.contains { $0.last?.url == referenceURL })
+            #expect(rows.contains { $0.count == 2 && $0.first?.id == notes.id }
+                == !iteration.isMultiple(of: 2))
+            #expect(model.activePane == .reference)
+            #expect(model.selectedURL == primaryURL)
+            #expect(model.referenceURL == referenceURL)
+        }
+
+        let previousID = model.fileTreeSelectionRequest?.id
+        model.revealActiveDocumentInFileTree()
+        #expect(await waitUntil { model.fileTreeSelectionRequest?.id != previousID })
+        model.activatePane(.primary)
+        model.revealActiveDocumentInFileTree()
+        #expect(await waitUntil { model.fileTreeSelectionRequest?.target == .url(primaryURL) })
+        #expect(model.referenceURL == referenceURL)
+
+        primary.selectedURL = root.deletingLastPathComponent().appendingPathComponent("outside.md")
+        model.installPaneStateForTesting(primary, in: .primary)
+        #expect(!model.canRevealActiveDocumentInFileTree)
     }
 
     @Test("Source session keeps the validated in-workspace target after symlink retargeting")

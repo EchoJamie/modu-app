@@ -15,6 +15,40 @@ enum FileSystemError: LocalizedError {
 }
 
 enum FileSystemService {
+    struct LoadedDirectory: Sendable {
+        let url: URL
+        let entries: [FileEntry]
+    }
+
+    /// Reads just one single-child chain, stopping at branches, files, or link cycles.
+    static func directoryChain(at directoryURL: URL, inside rootURL: URL) async throws -> [LoadedDirectory] {
+        try await CancellableWorker.run(priority: .userInitiated) {
+            var result: [LoadedDirectory] = []
+            var visited: Set<String> = []
+            var current = directoryURL.standardizedFileURL
+            while true {
+                try Task.checkCancellation()
+                let resolvedPath = current.resolvingSymlinksInPath().standardizedFileURL.path
+                guard visited.insert(resolvedPath).inserted else { break }
+                let entries: [FileEntry]
+                do {
+                    entries = try entriesSynchronously(at: current, inside: rootURL)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // Keep the readable prefix; the failing child remains collapsed
+                    // and can be retried explicitly using the normal expand action.
+                    if result.isEmpty { throw error }
+                    break
+                }
+                result.append(LoadedDirectory(url: current, entries: entries))
+                guard entries.count == 1, let child = entries.first, child.kind == .directory else { break }
+                current = child.url
+            }
+            return result
+        }
+    }
+
     static func previewKind(at url: URL) -> PreviewDocumentKind? {
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
         return PreviewDocumentKind.resolve(
