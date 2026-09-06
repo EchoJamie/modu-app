@@ -91,3 +91,18 @@ modu --version
 ## 产品官网
 
 产品展示站点位于 [`website/`](website/README.md)，包含功能介绍、阅读主题说明和 GitHub Releases 入口。仓库根目录的 `vercel.json` 已配置 Vercel 自动构建；导入 GitHub 仓库时，Root Directory 保持仓库根目录即可。详细预览和部署步骤见 [站点说明](website/README.md)。
+
+## GitHub 自动发布
+
+`.github/workflows/release.yml` 在推送 `vX.Y.Z` 标签后自动发布 macOS 安装包。标签必须与 `Config/Info.plist` 中的版本完全一致，且指向 `main` 分支上的提交。日常推送 `main` 只更新 Vercel 官网，不发布应用。
+
+发布前按版本规则更新版本、构建号、`changelog.md` 和上一正式交付基线，提交并推送到 `main`，然后推送对应标签。例如版本为 `0.10.1` 时：
+
+```bash
+git tag -a v0.10.1 -m "MoDu 0.10.1"
+git push origin v0.10.1
+```
+
+工作流分别在 Apple Silicon 和 Intel macOS runner 上调用现有 `scripts/package_dmg.sh`，保留依赖核验、测试、版本门禁以及中英文沙盒 WebView 自检。两种架构都成功后，才创建 GitHub Release，上传 DMG、SHA-256 校验文件与构建追溯清单，发布说明取自对应版本的 changelog。
+
+无需额外配置 Secret，发布使用 GitHub 自动提供的 `GITHUB_TOKEN`。仓库须启用 Actions 并允许工作流请求 `contents: write`。现有打包使用 ad-hoc 临时签名，尚未接入 Developer ID 签名和 Apple 公证。已存在的 Release 不会自动覆盖；失败任务可在 Actions 中重跑。

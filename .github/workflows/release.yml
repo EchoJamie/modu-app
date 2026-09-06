@@ -1,0 +1,110 @@
+name: Release macOS app
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate tag and toolchain
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          [[ "$(uname -m)" == "$EXPECTED_ARCH" ]]
+          git merge-base --is-ancestor HEAD origin/main
+          xcodebuild -version
+          swift --version
+      - name: Test and build formal DMG
+        run: ./scripts/package_dmg.sh
+      - name: Collect versioned artifacts
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          mkdir -p build/release
+          cp "build/MoDu-$version.dmg" "build/release/MoDu-$version-$ARCH.dmg"
+          cp build/release-manifest.txt "build/release/release-manifest-$ARCH.txt"
+          cp build/app-files.sha256 "build/release/app-files-$ARCH.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: build/release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: build/release
+          merge-multiple: true
+      - name: Prepare checksums and release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd build/release
+          sha256sum ./*.dmg > SHA256SUMS.txt
+          cd ../..
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          version = os.environ['RELEASE_TAG'][1:]
+          text = Path('changelog.md').read_text()
+          match = re.search(r'^## ' + re.escape(version) + r' — .*?(?=^## |\Z)', text, re.M | re.S)
+          if not match:
+              raise SystemExit('Missing changelog entry for release tag')
+          notes = match.group(0).strip()
+          notes += '\n\n## 下载说明\n\n- Apple Silicon：选择 arm64.dmg。\n- Intel：选择 x86_64.dmg。\n- 当前安装包使用 ad-hoc 临时签名，未经过 Apple Developer ID 签名或公证。\n- SHA256SUMS.txt 用于核对安装包完整性；release-manifest 与 app-files 保留构建追溯信息。\n'
+          Path('build/release-notes.md').write_text(notes)
+          PY
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" build/release/* \
+            --verify-tag --title "MoDu $RELEASE_TAG" \
+            --notes-file build/release-notes.md
