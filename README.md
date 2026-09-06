@@ -51,10 +51,20 @@ swift test
 
 ## 构建 macOS 应用
 
+主应用和两个命令行授权助手默认使用 `Apple Development: echojamieee@outlook.com (9JHY98AJMC)` 签名身份，证书 SHA-1 为 `EDAF5540E35BBA649726925FC5E5B0176BB07AEB`。构建机器的钥匙串必须持有对应有效证书及私钥，并允许 `codesign` 使用；证书缺失、过期、配置无效或私钥不可用都会使构建失败，不会回退到 ad-hoc 签名。私钥不得放入仓库。
+
 ```bash
 ./scripts/build_app.sh
 open 'build/MoDu Preview.app'
 ```
+
+可用 `security find-identity -v -p codesigning` 查看本机有效身份，再通过 `MODU_SIGNING_IDENTITY` 显式指定完整 40 位 SHA-1；同一配置也适用于 `package_dmg.sh`：
+
+```bash
+MODU_SIGNING_IDENTITY=EDAF5540E35BBA649726925FC5E5B0176BB07AEB ./scripts/build_app.sh
+```
+
+这里的开发证书签名用于本地开发。现有脚本尚未接入 Developer ID、公证及 stapling；生成 DMG 不代表通过 Apple 公证，仅覆盖签名身份也不会自动建立公证分发流程。
 
 构建脚本会先解析锁定的 SwiftPM 依赖，核对实际 checkout 的提交与 clean 状态，再执行测试与第三方资源校验；签名后分别使用英文和简体中文执行正式沙盒 WKWebView 冒烟检查。仓库内的持续开发验证产物位于 `build/MoDu Preview.app`，使用独立的显示名称和 Bundle Identifier，避免与正式安装的 MoDu 混淆；构建追溯信息位于 `build/release-manifest.txt`。如需生成 DMG：
 
@@ -84,9 +94,9 @@ modu --version
 
 打开文件时，MoDu 会把文件所在目录作为工作区并立即打开该文件。启动器通过 macOS LaunchServices 把路径交给应用；无论 MoDu 是否已经运行，都不会通过未授权的进程参数绕过应用沙盒。
 
-正式交付默认拒绝包含未提交或未跟踪输入的工作树。仅需验证开发态改动时可显式使用 `ALLOW_DIRTY_BUILD=1`；此时 `build/` 会额外保留完整二进制 patch 和未跟踪文件归档，不能将其当作基于提交的正式发布。
+正式交付默认拒绝包含未提交或未跟踪输入的工作树。仅需验证开发态改动时可显式使用 `ALLOW_DIRTY_BUILD=1`；构建清单会记录 `dirty_build=true` 和源码状态摘要，该产物不能当作基于提交的正式发布。构建脚本不会额外备份源码 patch 或未跟踪文件。
 
-`Config/release-baseline.json` 固定上一份正式交付的版本、构建号和 Git 提交；发布门禁会复核该提交中的真实 plist，并要求本次版本和构建号都严格递增。完成一次正式交付后，应在开始下一版本前把该基线更新为刚交付的提交，禁止把当前 HEAD 当作“上一版本”自比较。
+发布前校验版本格式、构建号格式及 `Config/Info.plist` 与 changelog 最新版本的一致性。新交付版本的递增规则按 `AGENTS.md` 执行。
 
 ## 产品官网
 
@@ -96,13 +106,21 @@ modu --version
 
 `.github/workflows/release.yml` 在推送 `vX.Y.Z` 标签后自动发布 macOS 安装包。标签必须与 `Config/Info.plist` 中的版本完全一致，且指向 `main` 分支上的提交。日常推送 `main` 只更新 Vercel 官网，不发布应用。
 
-发布前按版本规则更新版本、构建号、`changelog.md` 和上一正式交付基线，提交并推送到 `main`，然后推送对应标签。例如版本为 `0.10.1` 时：
+发布前按版本规则更新版本、构建号和 `changelog.md`，提交并推送到 `main`，然后从当前配置读取版本并推送对应标签：
 
 ```bash
-git tag -a v0.10.1 -m "MoDu 0.10.1"
-git push origin v0.10.1
+release_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+git tag -a "v$release_version" -m "MoDu $release_version"
+git push origin "v$release_version"
 ```
 
 工作流分别在 Apple Silicon 和 Intel macOS runner 上调用现有 `scripts/package_dmg.sh`，保留依赖核验、测试、版本门禁以及中英文沙盒 WebView 自检。两种架构都成功后，才创建 GitHub Release，上传 DMG、SHA-256 校验文件与构建追溯清单，发布说明取自对应版本的 changelog。
 
-无需额外配置 Secret，发布使用 GitHub 自动提供的 `GITHUB_TOKEN`。仓库须启用 Actions 并允许工作流请求 `contents: write`。现有打包使用 ad-hoc 临时签名，尚未接入 Developer ID 签名和 Apple 公证。已存在的 Release 不会自动覆盖；失败任务可在 Actions 中重跑。
+发布上传使用 GitHub 自动提供的 `GITHUB_TOKEN`，仓库须启用 Actions 并允许工作流请求 `contents: write`。签名配置沿用 QuotaPeek 的方式，在仓库的 Settings → Secrets and variables → Actions 中设置两个 Repository secrets：
+
+- `MACOS_CERTIFICATE_P12_BASE64`：上述 `echojamieee@outlook.com` 签名证书及对应私钥导出的加密 P12 文件，经 Base64 编码后的内容。
+- `MACOS_CERTIFICATE_PASSWORD`：导出该 P12 时设置的密码。
+
+两个架构的 runner 会分别将证书导入临时钥匙串，配置 `codesign` 非交互访问，并通过 `scripts/signing_identity.sh` 校验证书身份；缺少 Secret、密码错误或证书不匹配时立即失败。任务结束时无论成功或失败，都会清理临时 P12 和钥匙串。证书轮换时需同步更新这两个 Secrets 及脚本中的默认 SHA-1；不得将 P12、私钥或密码提交到仓库。
+
+当前自动打包使用 Apple Development 证书签名，尚未接入 Developer ID 与 Apple 公证。已存在的 Release 不会自动覆盖；失败任务可在 Actions 中重跑。

@@ -42,6 +42,29 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           xcodebuild -version
           swift --version
+      - name: Import signing certificate
+        shell: bash
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${CERTIFICATE_BASE64:?缺少 MACOS_CERTIFICATE_P12_BASE64}"
+          : "${CERTIFICATE_PASSWORD:?缺少 MACOS_CERTIFICATE_PASSWORD}"
+          umask 077
+          certificate_path="$RUNNER_TEMP/modu-signing.p12"
+          keychain_path="$RUNNER_TEMP/modu-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -P "$CERTIFICATE_PASSWORD" -k "$keychain_path" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path" >/dev/null
+          security list-keychains -d user -s "$keychain_path"
+          rm -f "$certificate_path"
+          /bin/zsh scripts/signing_identity.sh
       - name: Test and build formal DMG
         run: ./scripts/package_dmg.sh
       - name: Collect versioned artifacts
@@ -61,6 +84,14 @@ jobs:
           path: build/release/
           if-no-files-found: error
           retention-days: 14
+      - name: Clean up signing credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/modu-signing.p12"
+          if [ -f "$RUNNER_TEMP/modu-signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/modu-signing.keychain-db"
+          fi
 
   publish:
     needs: build
@@ -96,7 +127,7 @@ jobs:
           if not match:
               raise SystemExit('Missing changelog entry for release tag')
           notes = match.group(0).strip()
-          notes += '\n\n## 下载说明\n\n- Apple Silicon：选择 arm64.dmg。\n- Intel：选择 x86_64.dmg。\n- 当前安装包使用 ad-hoc 临时签名，未经过 Apple Developer ID 签名或公证。\n- SHA256SUMS.txt 用于核对安装包完整性；release-manifest 与 app-files 保留构建追溯信息。\n'
+          notes += '\n\n## 下载说明\n\n- Apple Silicon：选择 arm64.dmg。\n- Intel：选择 x86_64.dmg。\n- 当前安装包使用 Apple Development 证书签名，未经过 Apple Developer ID 签名或公证。\n- SHA256SUMS.txt 用于核对安装包完整性；release-manifest 与 app-files 保留构建追溯信息。\n'
           Path('build/release-notes.md').write_text(notes)
           PY
       - name: Publish GitHub Release

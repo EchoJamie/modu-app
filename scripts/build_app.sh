@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
+SIGNING_IDENTITY="$(/bin/zsh "$SCRIPT_DIR/signing_identity.sh")"
 BUILD_FLAVOR="${MODU_BUILD_FLAVOR:-preview}"
 PREVIEW_APP_DIR="$PROJECT_DIR/build/MoDu Preview.app"
 FORMAL_APP_DIR="$PROJECT_DIR/build/.formal/MoDu.app"
-LEGACY_APP_DIR="$PROJECT_DIR/build/MoDu.app"
 case "$BUILD_FLAVOR" in
   preview)
     APP_DIR="$PREVIEW_APP_DIR"
@@ -74,9 +74,6 @@ if [[ "$APP_DIR" != "$PREVIEW_APP_DIR" && "$APP_DIR" != "$FORMAL_APP_DIR" ]]; th
 fi
 
 /bin/rm -rf "$APP_DIR"
-if [[ -d "$LEGACY_APP_DIR" ]]; then
-  /bin/rm -rf "$LEGACY_APP_DIR"
-fi
 /bin/mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
 /bin/cp "$PROJECT_DIR/.build/release/MoDu" "$CONTENTS_DIR/MacOS/MoDu"
 /bin/cp "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
@@ -170,7 +167,7 @@ package_cli_installer() {
   done
   /usr/bin/printf 'APPL????' > "$helper_contents/PkgInfo"
 
-  /usr/bin/codesign --force --sign - "$helper_app"
+  /usr/bin/codesign --force --sign "$SIGNING_IDENTITY" "$helper_app"
   local helper_entitlements
   helper_entitlements="$(/usr/bin/codesign -d --entitlements - "$helper_app" 2>/dev/null || true)"
   if [[ "$helper_entitlements" == *"com.apple.security.app-sandbox"* ]]; then
@@ -218,7 +215,7 @@ done
 
 /usr/bin/codesign \
   --force \
-  --sign - \
+  --sign "$SIGNING_IDENTITY" \
   --entitlements "$PROJECT_DIR/Config/MoDu.entitlements" \
   "$APP_DIR"
 /usr/bin/codesign --verify --deep --strict "$APP_DIR"

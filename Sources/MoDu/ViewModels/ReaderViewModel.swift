@@ -641,9 +641,6 @@ final class ReaderViewModel: ObservableObject {
                 throw ReaderFileOperationError.targetOutsideWorkspace
             }
             if targetURL == sourceURL { return sourceURL }
-            guard !FileManager.default.fileExists(atPath: targetURL.path) else {
-                throw ReaderFileOperationError.targetAlreadyExists
-            }
 
             let updatedPrimary = selectedURL.flatMap {
                 replacingPathPrefix(in: $0, from: sourceURL, to: targetURL)
@@ -652,7 +649,12 @@ final class ReaderViewModel: ObservableObject {
                 replacingPathPrefix(in: $0, from: sourceURL, to: targetURL)
             }
 
-            try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+            do {
+                // FileManager supports case-only renames while rejecting existing destinations.
+                try FileManager.default.moveItem(at: sourceURL, to: targetURL)
+            } catch let error as CocoaError where error.code == .fileWriteFileExists {
+                throw ReaderFileOperationError.targetAlreadyExists
+            }
             sourceLanguageOverrides = Self.migratingSourceLanguageOverrides(
                 sourceLanguageOverrides,
                 from: sourceURL,
