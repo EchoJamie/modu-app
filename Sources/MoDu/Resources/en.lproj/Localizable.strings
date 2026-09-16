@@ -4,6 +4,20 @@
 "common.unknownError" = "Unknown error";
 
 "settings.general.title" = "General";
+"settings.shortcuts.title" = "Shortcuts";
+"settings.shortcuts.hint" = "Click a shortcut and press a new combination including ⌘ or ⌃. Press Esc to cancel. Changes are saved immediately.";
+"settings.shortcuts.recording" = "Type a shortcut…";
+"settings.shortcuts.invalid" = "Include ⌘ or ⌃";
+"settings.shortcuts.conflict" = "This shortcut is already used by “%@”. Choose another combination.";
+"settings.shortcuts.reset" = "Restore Default Shortcuts";
+"settings.shortcuts.space" = "Space";
+"command.toggleSidebar" = "Toggle Directory Sidebar";
+"command.toggleOutline" = "Toggle Outline";
+"command.toggleSplitReading" = "Toggle Second Reading Pane";
+"sidebar.show" = "Show Directory Sidebar";
+"sidebar.hide" = "Hide Directory Sidebar";
+"sidebar.resizeHelp" = "Drag to resize the directory sidebar";
+"sidebar.resizeAccessibility" = "Resize directory sidebar width";
 "settings.language" = "Language";
 "settings.appearance" = "Appearance";
 "language.system" = "Follow System";

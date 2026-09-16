@@ -82,6 +82,16 @@ struct DocumentGovernanceTests {
         #expect(window.makeFirstResponder(fileTreeFocusView))
         #expect(fileTreeFocusView.performKeyEquivalent(with: copyEvent))
         #expect(routedShortcutCount == 1)
+
+        fileTreeFocusView.setKeyboardEnabled(false)
+        #expect(window.firstResponder !== fileTreeFocusView)
+        #expect(!fileTreeFocusView.acceptsFirstResponder)
+        #expect(!fileTreeFocusView.performKeyEquivalent(with: copyEvent))
+        #expect(routedShortcutCount == 1)
+        fileTreeFocusView.setKeyboardEnabled(true)
+        #expect(window.makeFirstResponder(fileTreeFocusView))
+        #expect(fileTreeFocusView.performKeyEquivalent(with: copyEvent))
+        #expect(routedShortcutCount == 2)
     }
 
     @Test("Reader windows isolate documents and outlines while sharing preferences")

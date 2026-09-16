@@ -1,51 +1,58 @@
 import AppKit
 import SwiftUI
 
-struct ResizableOutlineLayout<Content: View, Outline: View>: View {
-    @Binding private var preferredOutlineWidth: CGFloat
+struct ResizableSidePanelLayout<Content: View, Panel: View>: View {
+    @Binding private var preferredPanelWidth: CGFloat
 
-    private let outlineIsVisible: Bool
+    private let panelIsVisible: Bool
+    private let edge: HorizontalEdge
     private let minimumContentWidth: CGFloat
-    private let minimumOutlineWidth: CGFloat
-    private let maximumOutlineWidth: CGFloat
+    private let minimumPanelWidth: CGFloat
+    private let maximumPanelWidth: CGFloat
     private let dividerColor: Color
-    private let onOutlineWidthCommit: (CGFloat) -> Void
+    private let onPanelWidthCommit: (CGFloat) -> Void
     private let content: Content
-    private let outline: Outline
+    private let panel: Panel
 
     init(
-        outlineIsVisible: Bool,
+        panelIsVisible: Bool,
+        edge: HorizontalEdge,
         minimumContentWidth: CGFloat,
-        preferredOutlineWidth: Binding<CGFloat>,
-        minimumOutlineWidth: CGFloat,
-        maximumOutlineWidth: CGFloat,
+        preferredPanelWidth: Binding<CGFloat>,
+        minimumPanelWidth: CGFloat,
+        maximumPanelWidth: CGFloat,
         dividerColor: Color,
-        onOutlineWidthCommit: @escaping (CGFloat) -> Void,
+        onPanelWidthCommit: @escaping (CGFloat) -> Void,
         @ViewBuilder content: () -> Content,
-        @ViewBuilder outline: () -> Outline
+        @ViewBuilder panel: () -> Panel
     ) {
-        self.outlineIsVisible = outlineIsVisible
+        self.panelIsVisible = panelIsVisible
+        self.edge = edge
         self.minimumContentWidth = minimumContentWidth
-        _preferredOutlineWidth = preferredOutlineWidth
-        self.minimumOutlineWidth = minimumOutlineWidth
-        self.maximumOutlineWidth = maximumOutlineWidth
+        _preferredPanelWidth = preferredPanelWidth
+        self.minimumPanelWidth = minimumPanelWidth
+        self.maximumPanelWidth = maximumPanelWidth
         self.dividerColor = dividerColor
-        self.onOutlineWidthCommit = onOutlineWidthCommit
+        self.onPanelWidthCommit = onPanelWidthCommit
         self.content = content()
-        self.outline = outline()
+        self.panel = panel()
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let availableMaximum = maximumAvailableOutlineWidth(
+            let availableMaximum = maximumAvailablePanelWidth(
                 totalWidth: geometry.size.width
             )
             let displayedWidth = min(
-                max(preferredOutlineWidth, minimumOutlineWidth),
+                max(preferredPanelWidth, minimumPanelWidth),
                 availableMaximum
             )
 
             HStack(spacing: 0) {
+                if edge == .leading {
+                    sizedPanel(width: displayedWidth, maximum: availableMaximum)
+                }
+
                 content
                     .frame(
                         minWidth: minimumContentWidth,
@@ -53,36 +60,48 @@ struct ResizableOutlineLayout<Content: View, Outline: View>: View {
                         maxHeight: .infinity
                     )
 
-                if outlineIsVisible {
-                    outline
-                        .frame(width: displayedWidth)
-                        .frame(maxHeight: .infinity)
-                        .overlay(alignment: .leading) {
-                            OutlineResizeHandle(
-                                preferredWidth: $preferredOutlineWidth,
-                                displayedWidth: displayedWidth,
-                                minimumWidth: minimumOutlineWidth,
-                                maximumWidth: availableMaximum,
-                                dividerColor: dividerColor,
-                                onCommit: onOutlineWidthCommit
-                            )
-                        }
+                if edge == .trailing {
+                    sizedPanel(width: displayedWidth, maximum: availableMaximum)
                 }
             }
         }
     }
 
-    private func maximumAvailableOutlineWidth(totalWidth: CGFloat) -> CGFloat {
+    private func sizedPanel(width: CGFloat, maximum: CGFloat) -> some View {
+        panel
+            .frame(width: width)
+            .frame(maxHeight: .infinity)
+            .overlay(alignment: edge == .leading ? .trailing : .leading) {
+                SidePanelResizeHandle(
+                    preferredWidth: $preferredPanelWidth,
+                    edge: edge,
+                    displayedWidth: width,
+                    minimumWidth: minimumPanelWidth,
+                    maximumWidth: maximum,
+                    dividerColor: dividerColor,
+                    onCommit: onPanelWidthCommit
+                )
+            }
+            // Keep selection and scroll state alive while the panel is collapsed.
+            .frame(width: panelIsVisible ? width : 0)
+            .clipped()
+            .disabled(!panelIsVisible)
+            .allowsHitTesting(panelIsVisible)
+            .accessibilityHidden(!panelIsVisible)
+    }
+
+    private func maximumAvailablePanelWidth(totalWidth: CGFloat) -> CGFloat {
         let available = totalWidth
             - minimumContentWidth
-        return min(maximumOutlineWidth, max(minimumOutlineWidth, available))
+        return min(maximumPanelWidth, max(minimumPanelWidth, available))
     }
 }
 
-private struct OutlineResizeHandle: View {
+private struct SidePanelResizeHandle: View {
     static let hitWidth: CGFloat = 9
 
     @Binding var preferredWidth: CGFloat
+    let edge: HorizontalEdge
     let displayedWidth: CGFloat
     let minimumWidth: CGFloat
     let maximumWidth: CGFloat
@@ -96,7 +115,7 @@ private struct OutlineResizeHandle: View {
         Rectangle()
             .fill(.clear)
             .frame(width: Self.hitWidth)
-            .overlay(alignment: .leading) {
+            .overlay(alignment: edge == .leading ? .trailing : .leading) {
                 Rectangle()
                     .fill(dividerColor.opacity(0.75))
                     .frame(width: 1)
@@ -111,12 +130,13 @@ private struct OutlineResizeHandle: View {
                             dragStartPointerX = value.startLocation.x
                         }
                         guard let dragStartWidth, let dragStartPointerX else { return }
-                        preferredWidth = OutlineResizeMath.width(
+                        preferredWidth = SidePanelResizeMath.width(
                             startWidth: dragStartWidth,
                             startPointerX: dragStartPointerX,
                             currentPointerX: value.location.x,
                             minimumWidth: minimumWidth,
-                            maximumWidth: maximumWidth
+                            maximumWidth: maximumWidth,
+                            edge: edge
                         )
                         NSCursor.resizeLeftRight.set()
                     }
@@ -135,21 +155,23 @@ private struct OutlineResizeHandle: View {
                     onCommit(preferredWidth)
                 }
             }
-            .help(L10n.string(.outlineResizeHelp))
-            .accessibilityLabel(L10n.string(.outlineResizeAccessibility))
+            .help(L10n.string(edge == .leading ? .sidebarResizeHelp : .outlineResizeHelp))
+            .accessibilityLabel(L10n.string(edge == .leading ? .sidebarResizeAccessibility : .outlineResizeAccessibility))
     }
 }
 
-enum OutlineResizeMath {
+enum SidePanelResizeMath {
     static func width(
         startWidth: CGFloat,
         startPointerX: CGFloat,
         currentPointerX: CGFloat,
         minimumWidth: CGFloat,
-        maximumWidth: CGFloat
+        maximumWidth: CGFloat,
+        edge: HorizontalEdge = .trailing
     ) -> CGFloat {
         let pointerDelta = currentPointerX - startPointerX
-        return min(max(startWidth - pointerDelta, minimumWidth), maximumWidth)
+        let width = startWidth + (edge == .leading ? pointerDelta : -pointerDelta)
+        return min(max(width, minimumWidth), maximumWidth)
     }
 }
 

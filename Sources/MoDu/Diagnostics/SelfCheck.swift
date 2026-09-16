@@ -682,14 +682,14 @@ enum SelfCheck {
                 "左右侧栏最大宽度按当前窗口三分之一动态调整并保留最小可用宽度"
             )
             check(
-                OutlineResizeMath.width(
+                SidePanelResizeMath.width(
                     startWidth: 320,
                     startPointerX: 800,
                     currentPointerX: 740,
                     minimumWidth: 260,
                     maximumWidth: 600
                 ) == 380 &&
-                    OutlineResizeMath.width(
+                    SidePanelResizeMath.width(
                         startWidth: 320,
                         startPointerX: 800,
                         currentPointerX: 900,
@@ -697,6 +697,25 @@ enum SelfCheck {
                         maximumWidth: 600
                     ) == 260,
                 "大纲分割条按全局鼠标位移一比一调整宽度并正确限制边界"
+            )
+            check(
+                SidePanelResizeMath.width(
+                    startWidth: 268,
+                    startPointerX: 268,
+                    currentPointerX: 328,
+                    minimumWidth: 220,
+                    maximumWidth: 480,
+                    edge: .leading
+                ) == 328 &&
+                    SidePanelResizeMath.width(
+                        startWidth: 268,
+                        startPointerX: 268,
+                        currentPointerX: 600,
+                        minimumWidth: 220,
+                        maximumWidth: 480,
+                        edge: .leading
+                    ) == 480,
+                "目录栏分割条向右拖动增宽并正确限制最大宽度"
             )
 
             check(MarkdownStyle.migrated(from: "paper") == .newsprint, "旧纸页主题偏好可迁移")

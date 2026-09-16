@@ -8,18 +8,23 @@ final class ApplicationState: ObservableObject {
     @Published private(set) var appAppearance: AppAppearance
     @Published private(set) var markdownStyle: MarkdownStyle
     @Published private(set) var recentWorkspaces: [RecentWorkspace] = []
+    @Published private(set) var shortcutBindings: [String: ReaderShortcut]
 
     private let defaults: UserDefaults
 
     private static let recentWorkspaceBookmarksKey = "recentWorkspaceBookmarks.v1"
     private static let readerThemeKey = "readerTheme.v2"
     private static let maximumRecentWorkspaceCount = 8
+    private static let shortcutBindingsKey = "readerShortcuts.v1"
 
     init(
         defaults: UserDefaults = .standard,
         restoreRecentWorkspaces: Bool = true
     ) {
         self.defaults = defaults
+        shortcutBindings = defaults.data(forKey: Self.shortcutBindingsKey)
+            .flatMap { try? JSONDecoder().decode([String: ReaderShortcut].self, from: $0) }?
+            .filter { $0.value.isValid } ?? [:]
 
         let legacyTheme = defaults.string(forKey: "readerTheme")
         let savedTheme = defaults.string(forKey: Self.readerThemeKey)
@@ -50,6 +55,32 @@ final class ApplicationState: ObservableObject {
         guard appLanguage != newLanguage else { return }
         defaults.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
         appLanguage = newLanguage
+    }
+
+    func shortcut(for action: ReaderShortcutAction) -> ReaderShortcut {
+        shortcutBindings[action.rawValue] ?? action.defaultBinding
+    }
+
+    /// Returns a localized error without changing the existing binding on failure.
+    func setShortcut(_ shortcut: ReaderShortcut, for action: ReaderShortcutAction) -> String? {
+        guard shortcut.isValid else { return L10n.string(.settingsShortcutInvalid) }
+        if let conflict = ReaderShortcutAction.allCases.first(where: {
+            $0 != action && self.shortcut(for: $0) == shortcut
+        }) {
+            return L10n.format(.settingsShortcutConflict, conflict.title)
+        }
+        if shortcut != self.shortcut(for: action),
+           let title = shortcut.conflictingMenuItem(in: NSApp?.mainMenu) {
+            return L10n.format(.settingsShortcutConflict, title)
+        }
+        shortcutBindings[action.rawValue] = shortcut
+        defaults.set(try? JSONEncoder().encode(shortcutBindings), forKey: Self.shortcutBindingsKey)
+        return nil
+    }
+
+    func resetShortcuts() {
+        shortcutBindings = [:]
+        defaults.removeObject(forKey: Self.shortcutBindingsKey)
     }
 
     func selectAppAppearance(_ newAppearance: AppAppearance) {

@@ -121,6 +121,7 @@ final class ReaderViewModel: ObservableObject {
     ]
     @Published var activePane: ReaderPaneID = .primary
 
+    @Published var sidebarIsVisible = true
     @Published var outlineIsVisible = true
     @Published private(set) var systemColorScheme: ColorScheme
     @Published private(set) var fileOperationError: String?
@@ -180,6 +181,10 @@ final class ReaderViewModel: ObservableObject {
     }
 
     var rootName: String { rootURL?.lastPathComponent ?? L10n.string(.workspaceNotOpened) }
+    func toggleSidebar() {
+        sidebarIsVisible.toggle()
+    }
+
     var selectedURL: URL? { paneStates[.primary]?.selectedURL }
     var documentState: ReaderDocumentState { paneStates[.primary]?.documentState ?? .welcome }
     var scrollRequest: ScrollRequest? { paneStates[.primary]?.scrollRequest }

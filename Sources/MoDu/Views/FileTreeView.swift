@@ -469,6 +469,7 @@ private struct FileTreeRow: View {
 }
 
 private struct FileTreeKeyboardMonitor: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let selectedNodeID: String?
     let focusRequestID: UUID
     let isRenaming: Bool
@@ -505,12 +506,13 @@ private struct FileTreeKeyboardMonitor: NSViewRepresentable {
         context.coordinator.onMoveLeft = onMoveLeft
         context.coordinator.onMoveRight = onMoveRight
         if let focusView = nsView as? FileTreeFocusView {
+            focusView.setKeyboardEnabled(isEnabled)
             focusView.onFocusChanged = onFocusChanged
             context.coordinator.attach(to: focusView)
         }
         if context.coordinator.lastFocusRequestID != focusRequestID {
             context.coordinator.lastFocusRequestID = focusRequestID
-            guard selectedNodeID != nil, !isRenaming else { return }
+            guard isEnabled, selectedNodeID != nil, !isRenaming else { return }
             DispatchQueue.main.async { [weak nsView] in
                 guard let nsView else { return }
                 nsView.window?.makeFirstResponder(nsView)
@@ -629,7 +631,14 @@ final class FileTreeFocusView: NSView {
     var onFocusChanged: ((Bool) -> Void)?
     var onKeyEvent: ((NSEvent) -> Bool)?
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { !isHiddenOrHasHiddenAncestor }
+
+    func setKeyboardEnabled(_ enabled: Bool) {
+        isHidden = !enabled
+        if !enabled, window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
+        }
+    }
     override var focusRingType: NSFocusRingType {
         get { .none }
         set {}

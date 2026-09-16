@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @State private var selectedTab = "general"
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             GeneralSettingsView()
                 .tabItem {
                     Label(
@@ -10,6 +12,13 @@ struct SettingsView: View {
                         systemImage: "gearshape"
                     )
                 }
+                .tag("general")
+
+            ShortcutSettingsView()
+                .tabItem {
+                    Label(L10n.string(.settingsShortcutsTitle), systemImage: "keyboard")
+                }
+                .tag("shortcuts")
 
             CommandLineSettingsView()
                 .tabItem {
@@ -18,8 +27,9 @@ struct SettingsView: View {
                         systemImage: "terminal"
                     )
                 }
+                .tag("cli")
         }
-        .frame(width: 560, height: 180)
+        .frame(width: 560, height: selectedTab == "shortcuts" ? 570 : 180)
         .background(SettingsWindowFocusResetter())
     }
 }

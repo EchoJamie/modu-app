@@ -4,6 +4,20 @@
 "common.unknownError" = "未知错误";
 
 "settings.general.title" = "通用";
+"settings.shortcuts.title" = "快捷键";
+"settings.shortcuts.hint" = "点击快捷键后按下新组合键，需包含 ⌘ 或 ⌃。按 Esc 取消，修改立即保存。";
+"settings.shortcuts.recording" = "请按快捷键…";
+"settings.shortcuts.invalid" = "请包含 ⌘ 或 ⌃";
+"settings.shortcuts.conflict" = "此快捷键已用于“%@”，请使用其他组合键。";
+"settings.shortcuts.reset" = "恢复默认快捷键";
+"settings.shortcuts.space" = "空格";
+"command.toggleSidebar" = "展开 / 收起目录栏";
+"command.toggleOutline" = "展开 / 收起大纲";
+"command.toggleSplitReading" = "打开 / 关闭第二阅读栏";
+"sidebar.show" = "显示目录栏";
+"sidebar.hide" = "隐藏目录栏";
+"sidebar.resizeHelp" = "拖动调整目录栏宽度";
+"sidebar.resizeAccessibility" = "调整目录栏宽度";
 "settings.language" = "语言";
 "settings.appearance" = "明暗模式";
 "language.system" = "跟随系统";

@@ -268,9 +268,10 @@ struct MoDuApp: App {
                 .environmentObject(appDelegate)
                 .frame(minWidth: 1160, minHeight: 620)
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 860)
         .commands {
-            MoDuReaderCommands()
+            MoDuReaderCommands(applicationState: applicationState)
         }
 
         Settings {

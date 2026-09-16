@@ -5,6 +5,7 @@ enum MoDuWindow {
 }
 
 struct MoDuReaderCommands: Commands {
+    @ObservedObject var applicationState: ApplicationState
     @Environment(\.openWindow) private var openWindow
     @FocusedObject private var model: ReaderViewModel?
 
@@ -13,14 +14,14 @@ struct MoDuReaderCommands: Commands {
             Button(L10n.string(.commandNewWindow)) {
                 openWindow(id: MoDuWindow.readerSceneID)
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .newWindow).keyboardShortcut)
 
             Divider()
 
             Button(L10n.string(.commandOpenFolder)) {
                 model?.chooseFolder()
             }
-            .keyboardShortcut("o", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .openFolder).keyboardShortcut)
             .disabled(model == nil)
 
             if let model, !model.recentWorkspaces.isEmpty {
@@ -47,25 +48,25 @@ struct MoDuReaderCommands: Commands {
             Button(L10n.string(.commandReloadDocumentOutline)) {
                 model?.reloadActiveDocument()
             }
-            .keyboardShortcut("r", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .reloadDocument).keyboardShortcut)
             .disabled(model?.canReloadActiveDocument != true)
 
             Button(L10n.string(.commandReloadDirectory)) {
                 model?.rescanWorkspace()
             }
-            .keyboardShortcut("r", modifiers: [.command, .option])
+            .keyboardShortcut(applicationState.shortcut(for: .reloadDirectory).keyboardShortcut)
             .disabled(model?.rootURL == nil)
 
             Button(L10n.string(.commandFindInDocument)) {
                 model?.requestDocumentSearchFocus()
             }
-            .keyboardShortcut("f", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .findInDocument).keyboardShortcut)
             .disabled(model?.canFindInActiveDocument != true)
 
             Button(L10n.string(.commandGoToLine)) {
                 model?.requestSourceLineJumpFocus()
             }
-            .keyboardShortcut("l", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .goToLine).keyboardShortcut)
             .disabled(model?.canJumpToLineInActiveDocument != true)
 
             Divider()
@@ -85,17 +86,23 @@ struct MoDuReaderCommands: Commands {
                 : .commandOpenSecondPane)) {
                 model?.toggleSplitReading()
             }
-            .keyboardShortcut("\\", modifiers: .command)
+            .keyboardShortcut(applicationState.shortcut(for: .toggleSplitReading).keyboardShortcut)
             .disabled(model == nil)
 
             Divider()
+
+            Button(L10n.string(model?.sidebarIsVisible == false ? .sidebarShow : .sidebarHide)) {
+                model?.toggleSidebar()
+            }
+            .keyboardShortcut(applicationState.shortcut(for: .toggleSidebar).keyboardShortcut)
+            .disabled(model == nil)
 
             Button(L10n.string(model?.outlineIsVisible == false
                 ? .outlineShow
                 : .outlineHide)) {
                 model?.outlineIsVisible.toggle()
             }
-            .keyboardShortcut("0", modifiers: [.command, .option])
+            .keyboardShortcut(applicationState.shortcut(for: .toggleOutline).keyboardShortcut)
             .disabled(model == nil)
         }
     }

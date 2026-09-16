@@ -3,7 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: ReaderViewModel
     @Environment(\.colorScheme) private var colorScheme
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var sidebarPanelWidth = SidePanelLayout.restoredSidebarWidth()
     @State private var outlinePanelWidth = OutlinePanelLayout.restoredWidth()
 
     private var theme: ResolvedReaderTheme { model.resolvedTheme }
@@ -14,67 +14,54 @@ struct RootView: View {
                 forWindowWidth: geometry.size.width
             )
 
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView()
-                    .navigationSplitViewColumnWidth(
-                        min: SidePanelLayout.sidebarMinimumWidth,
-                        ideal: SidePanelLayout.sidebarIdealWidth,
-                        max: panelMaximumWidth
-                    )
-            } detail: {
-                ResizableOutlineLayout(
-                    outlineIsVisible: model.outlineIsVisible,
-                    minimumContentWidth: model.hasSecondPane ? 640 : 320,
-                    preferredOutlineWidth: $outlinePanelWidth,
-                    minimumOutlineWidth: OutlinePanelLayout.minimumWidth,
-                    maximumOutlineWidth: panelMaximumWidth,
-                    dividerColor: theme.divider,
-                    onOutlineWidthCommit: persistOutlinePanelWidth
-                ) {
-                    readerPanes
-                } outline: {
-                    OutlineView(
-                        items: model.outlineItems(for: model.activePane),
-                        pane: model.activePane
-                    )
+            ResizableSidePanelLayout(
+                panelIsVisible: model.sidebarIsVisible,
+                edge: .leading,
+                minimumContentWidth: (model.hasSecondPane ? 640 : 320)
+                    + (model.outlineIsVisible ? OutlinePanelLayout.minimumWidth : 0),
+                preferredPanelWidth: $sidebarPanelWidth,
+                minimumPanelWidth: SidePanelLayout.sidebarMinimumWidth,
+                maximumPanelWidth: panelMaximumWidth,
+                dividerColor: theme.divider,
+                onPanelWidthCommit: persistSidebarPanelWidth
+            ) {
+                VStack(spacing: 0) {
+                    readerTitlebar
+                    Divider().overlay(theme.divider.opacity(0.75))
+
+                    ResizableSidePanelLayout(
+                        panelIsVisible: model.outlineIsVisible,
+                        edge: .trailing,
+                        minimumContentWidth: model.hasSecondPane ? 640 : 320,
+                        preferredPanelWidth: $outlinePanelWidth,
+                        minimumPanelWidth: OutlinePanelLayout.minimumWidth,
+                        maximumPanelWidth: panelMaximumWidth,
+                        dividerColor: theme.divider,
+                        onPanelWidthCommit: persistOutlinePanelWidth
+                    ) {
+                        readerPanes
+                    } panel: {
+                        OutlineView(
+                            items: model.outlineItems(for: model.activePane),
+                            pane: model.activePane
+                        )
+                    }
                 }
-            }
-            .navigationSplitViewStyle(.balanced)
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        model.reloadActiveDocument()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+            } panel: {
+                VStack(spacing: 0) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        sidebarToggle
                     }
-                    .disabled(!model.canReloadActiveDocument)
-                    .focusable(false)
-                    .help(L10n.string(.toolbarReloadHelp))
+                    // The native traffic lights remain in the leading titlebar area.
+                    .padding(.leading, 80)
+                    .padding(.trailing, 10)
+                    .frame(height: 38)
+                    .background(WindowTitlebarDragArea())
+                    .background(theme.chrome)
 
-                    Button {
-                        model.toggleSplitReading()
-                    } label: {
-                        Image(systemName: "rectangle.split.2x1")
-                            .symbolVariant(model.hasSecondPane ? .fill : .none)
-                    }
-                    .focusable(false)
-                    .help(L10n.string(model.hasSecondPane
-                        ? .toolbarCloseSplitHelp
-                        : .toolbarOpenSplitHelp))
-                    .accessibilityLabel(L10n.string(model.hasSecondPane
-                        ? .commandCloseActivePane
-                        : .commandOpenSecondPane))
-
-                    themeMenu
-
-                    Button {
-                        model.outlineIsVisible.toggle()
-                    } label: {
-                        Image(systemName: "sidebar.right")
-                            .symbolVariant(model.outlineIsVisible ? .fill : .none)
-                    }
-                    .focusable(false)
-                    .help(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
+                    Divider().overlay(theme.divider.opacity(0.75))
+                    SidebarView()
                 }
             }
             .tint(theme.accent)
@@ -86,6 +73,86 @@ struct RootView: View {
                 model.updateSystemColorScheme(newColorScheme)
             }
         }
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var sidebarToggle: some View {
+        Button {
+            model.toggleSidebar()
+        } label: {
+            Image(systemName: "sidebar.left")
+                .symbolVariant(model.sidebarIsVisible ? .fill : .none)
+                .frame(width: 28, height: 26)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.secondary)
+        .focusable(false)
+        .help(L10n.string(model.sidebarIsVisible ? .sidebarHide : .sidebarShow))
+        .accessibilityLabel(L10n.string(model.sidebarIsVisible ? .sidebarHide : .sidebarShow))
+    }
+
+    private var readerTitlebar: some View {
+        HStack(spacing: 10) {
+            if !model.sidebarIsVisible {
+                sidebarToggle
+                    .padding(.leading, 80)
+            }
+
+            if model.hasSecondPane {
+                Text(L10n.string(.appName))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(theme.foreground)
+                    .padding(.leading, 12)
+                Spacer(minLength: 0)
+            } else {
+                DocumentHeaderView(pane: .primary)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    model.reloadActiveDocument()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 28, height: 26)
+                }
+                .disabled(!model.canReloadActiveDocument)
+                .help(L10n.string(.toolbarReloadHelp))
+
+                Button {
+                    model.toggleSplitReading()
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                        .symbolVariant(model.hasSecondPane ? .fill : .none)
+                        .frame(width: 28, height: 26)
+                }
+                .help(L10n.string(model.hasSecondPane
+                    ? .toolbarCloseSplitHelp
+                    : .toolbarOpenSplitHelp))
+                .accessibilityLabel(L10n.string(model.hasSecondPane
+                    ? .commandCloseActivePane
+                    : .commandOpenSecondPane))
+
+                themeMenu
+                    .frame(width: 28, height: 26)
+
+                Button {
+                    model.outlineIsVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .symbolVariant(model.outlineIsVisible ? .fill : .none)
+                        .frame(width: 28, height: 26)
+                }
+                .help(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
+                .accessibilityLabel(L10n.string(model.outlineIsVisible ? .outlineHide : .outlineShow))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.secondary)
+            .focusable(false)
+            .padding(.trailing, 10)
+        }
+        .frame(height: 38)
+        .background(WindowTitlebarDragArea())
+        .background(theme.chrome)
     }
 
     @ViewBuilder
@@ -111,6 +178,10 @@ struct RootView: View {
             Double(clampedWidth),
             forKey: OutlinePanelLayout.storageKey
         )
+    }
+
+    private func persistSidebarPanelWidth(_ width: CGFloat) {
+        UserDefaults.standard.set(Double(width), forKey: SidePanelLayout.sidebarWidthStorageKey)
     }
 
     private var themeMenu: some View {
@@ -165,6 +236,12 @@ enum SidePanelLayout {
     static let sidebarMinimumWidth: CGFloat = 220
     static let sidebarIdealWidth: CGFloat = 268
     static let maximumWindowFraction: CGFloat = 1 / 3
+    static let sidebarWidthStorageKey = "sidebarPanelWidth.v1"
+
+    static func restoredSidebarWidth() -> CGFloat {
+        let width = UserDefaults.standard.double(forKey: sidebarWidthStorageKey)
+        return width > 0 ? max(CGFloat(width), sidebarMinimumWidth) : sidebarIdealWidth
+    }
 
     static func maximumWidth(forWindowWidth width: CGFloat) -> CGFloat {
         max(
